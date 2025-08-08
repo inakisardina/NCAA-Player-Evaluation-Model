@@ -1,0 +1,384 @@
+---
+title: "Hitter Evaluation Report - `r params$player`" 
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    theme: cosmo
+    number_sections: false
+    df_print: kable
+params:
+  player: ""
+  extra_note: ""
+---
+**Hitter Notes**
+LHH RF from San Diego. Left-handed bat with a balanced mix of power and discipline. Slashed .292/.398/.506 over 205 PA with 10 HR, 50 RBI, and a .392 wOBA. Has a patient approach (7.8% BB%) with some swing-and-miss (19.0% K%).
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  error = FALSE
+)
+
+library(tidyverse)
+library(data.table)
+library(knitr)
+library(viridis)
+library(MASS)
+
+# Namespace lock for safety
+select <- dplyr::select
+filter <- dplyr::filter
+mutate <- dplyr::mutate
+rename <- dplyr::rename
+summarise <- dplyr::summarise
+arrange <- dplyr::arrange
+```
+
+## Player Summary: `r params$player`
+
+### Core Metrics
+
+```{r core_metrics}
+player_data <- hitting_ultra %>% filter(Batter == params$player) %>% 
+  mutate("Results+" = round(Results_Plus, 1),
+         "Eye+" = round(Eye_Plus, 1),
+         "Contact+" = round(Contact_Plus, 1),
+         "xwOBA+" = round(xwOBA_Plus, 1),
+         "Battle+" = round(Battle_Plus, 1),
+         "Hitting Ultra" = round(Hitting_Ultra, 1))
+kable(player_data %>% select(PA, "Results+", "Eye+", "Contact+", "xwOBA+", "Battle+", "Hitting Ultra"))
+```
+
+### Results Summary
+
+```{r results_summary}
+results_data <- hitter_results %>% filter(Batter == params$player) %>% 
+  mutate(OPS =  round(SLG + OBP, 3),
+         AVG = round(AVG, 3),
+         OBP = round(OBP, 3),
+         SLG = round(SLG, 3),
+         ISO = round(ISO, 3),
+         "wOBA+" = round(wOBA_Plus, 1),
+         "Results+" = round(Results_Plus, 1))
+kable(results_data %>% select(PA, AB, Hits, HR, AVG, OBP, K, BB, SLG, ISO, OPS, "wOBA+", "Results+"))
+```
+
+### Swing Decision Breakdown
+
+```{r eye_table}
+eye_data <- hitter_pitchtype_decision_summary %>% filter(Batter == params$player) %>% 
+    mutate("Eye+" = round(Eye_Plus, 1),
+           "Swing+" = round(Swing_Plus, 1),
+           "Total Pitches" = Total_Pitches,
+           "Pitch" = TaggedPitchType,
+           "Chase+" = round(Chase_Plus, 1))
+kable(eye_data %>% select("Pitch", "Eye+", "Swing+", "Chase+", "Total Pitches"))
+```
+
+### Contact Quality by Pitch Type
+
+```{r contact_pitchtype}
+contact_type_data <- hitter_contact_summary %>% filter(Batter == params$player) %>% 
+  mutate("Hard Hit %" = round(HardHit_Rate * 100, 1),
+         "Contact+" = round(Contact_Plus, 1),
+         "Pitch" = TaggedPitchType,
+         "Batted Balls" = Total_BattedBalls,
+         "AVG EV" = round(avg_EV, 1))
+kable(contact_type_data %>% select("Pitch", "AVG EV", "AVG EV", "Hard Hit %", "Contact+", `Batted Balls`))
+```
+### Battle Score
+
+```{r battle}
+battle_data <- battles_by_hitter %>% filter(Batter == params$player) %>% 
+  mutate("Battle Score" = round(Total_Battle_Score, 3),
+          "AVG Battle Score" = round(Avg_Battle_Score, 3),
+           "AVG Stuff Faced" = round(Avg_Stuff_Faced, 1))
+kable(battle_data %>% select(Batter, "Battle Score", `AVG Battle Score`, `AVG Stuff Faced`))
+```
+
+### Exit Velo Heatmap by Pitch Type
+
+```{r exitvelo_heatmap}
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+# Define bin edges — 6x6 grid
+binx <- seq(-1.5, 1.5, length.out = 7)
+binz <- seq(1, 4.5, length.out = 7)
+
+# Compute bin centers
+binx_mid <- head(binx, -1) + diff(binx)/2
+binz_mid <- head(binz, -1) + diff(binz)/2
+
+# Build full grid across pitch types
+pitch_types <- clean_data %>%
+  filter(Batter == params$player) %>%
+  distinct(TaggedPitchType) %>%
+  pull()
+
+grid <- expand.grid(
+  BinX = binx_mid,
+  BinZ = binz_mid,
+  TaggedPitchType = pitch_types
+)
+
+# Bin data by assigning bin centers
+bb_ev_binned <- clean_data %>%
+  filter(Batter == params$player,
+         !is.na(PlateLocSide), 
+         !is.na(PlateLocHeight),
+         !is.na(ExitSpeed),
+         !is.na(TaggedPitchType),
+         PlateLocSide >= min(binx),
+         PlateLocSide <= max(binx),
+         PlateLocHeight >= min(binz),
+         PlateLocHeight <= max(binz)) %>%
+  mutate(
+    BinX = binx_mid[findInterval(PlateLocSide, binx, rightmost.closed = TRUE)],
+    BinZ = binz_mid[findInterval(PlateLocHeight, binz, rightmost.closed = TRUE)]
+  ) %>%
+  group_by(TaggedPitchType, BinX, BinZ) %>%
+  summarise(
+    AvgEV = mean(ExitSpeed),
+    Count = n(),
+    .groups = "drop"
+  )
+
+# Merge with full grid so empty zones exist
+binned_full <- grid %>%
+  left_join(bb_ev_binned, by = c("TaggedPitchType", "BinX", "BinZ")) %>%
+  mutate(
+    Count = replace_na(Count, 0),
+    AvgEV = replace_na(AvgEV, 65),  # blue for empty
+    Alpha = ifelse(Count == 0, 1, Count / max(Count, na.rm = TRUE))
+  )
+
+# Plot
+p <- ggplot(binned_full, aes(x = BinX, y = BinZ)) +
+  geom_tile(aes(fill = AvgEV, alpha = Alpha), color = "black", size = 0.4) +
+  scale_fill_gradientn(
+    colors = c("white", "yellow", "orange", "red"),
+    limits = c(65, 110),
+    name = "Avg EV\n(Transparency = Volume)"
+  ) +
+  scale_alpha(range = c(0.1, 1), guide = "none") +
+  facet_wrap(~ TaggedPitchType, ncol = 3) +
+  geom_rect(aes(xmin = -0.83, xmax = 0.83, ymin = 1.5, ymax = 3.5),
+            color = "black", fill = NA, linetype = "dashed", size = 1) +
+  coord_fixed() +
+  labs(
+    title = paste("Exit Velo Strike Zone Map –", params$player),
+    x = NULL, y = NULL
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    panel.grid = element_blank(),
+    legend.position = "right",
+    strip.text = element_text(size = 10, face = "bold"),
+    plot.title = element_text(hjust = 0.5)
+  )
+
+print(p)
+```
+
+### Swing & Miss Heat Map
+
+```{r swing_miss_heatmap}
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+# Same bin edges
+binx <- seq(-1.5, 1.5, length.out = 7)
+binz <- seq(1, 4.5, length.out = 7)
+binx_mid <- head(binx, -1) + diff(binx)/2
+binz_mid <- head(binz, -1) + diff(binz)/2
+
+# Get all pitch types for this player
+pitch_types <- clean_data %>%
+  filter(Batter == params$player) %>%
+  distinct(TaggedPitchType) %>%
+  pull()
+
+# Full grid for all bins + pitch types
+grid <- expand.grid(
+  BinX = binx_mid,
+  BinZ = binz_mid,
+  TaggedPitchType = pitch_types
+)
+
+# Bin the actual data safely
+bb_whiff_binned <- clean_data %>%
+  filter(Batter == params$player,
+         !is.na(PlateLocSide), 
+         !is.na(PlateLocHeight),
+         !is.na(PitchCall_clean),
+         !is.na(TaggedPitchType),
+         PlateLocSide >= min(binx), PlateLocSide <= max(binx),
+         PlateLocHeight >= min(binz), PlateLocHeight <= max(binz)) %>%
+  mutate(
+    BinX = binx_mid[findInterval(PlateLocSide, binx, rightmost.closed = TRUE)],
+    BinZ = binz_mid[findInterval(PlateLocHeight, binz, rightmost.closed = TRUE)],
+    is_whiff = ifelse(PitchCall_clean == "Swinging Strike", 1, 0)
+  ) %>%
+  group_by(TaggedPitchType, BinX, BinZ) %>%
+  summarise(
+    total = n(),
+    whiffs = sum(is_whiff),
+    whiff_rate = ifelse(total > 0, whiffs / total, 0),
+    .groups = "drop"
+  )
+
+# Merge into full grid to keep empty bins
+binned_full_whiff <- grid %>%
+  left_join(bb_whiff_binned, by = c("TaggedPitchType", "BinX", "BinZ")) %>%
+  mutate(
+    total = replace_na(total, 0),
+    whiff_rate = replace_na(whiff_rate, 0),
+    Alpha = ifelse(total == 0, .001, total / max(total, na.rm = TRUE))
+  )
+
+# Plot
+p <- ggplot(binned_full_whiff, aes(x = BinX, y = BinZ)) +
+  geom_tile(aes(fill = whiff_rate, alpha = Alpha), color = "black", size = 0.4) +
+  scale_fill_gradientn(
+    colors = c("white", "yellow", "orange", "red"),
+    limits = c(0, 1),
+    name = "Whiff Rate\n(Transparency = Volume)",
+    labels = scales::percent
+  ) +
+  scale_alpha(range = c(0.1, 1), guide = "none") +
+  facet_wrap(~ TaggedPitchType, ncol = 3) +
+  geom_rect(aes(xmin = -0.83, xmax = 0.83, ymin = 1.5, ymax = 3.5),
+            color = "black", fill = NA, linetype = "dashed", size = 1) +
+  coord_fixed() +
+  labs(
+    title = paste("Whiff Map w/ Volume –", params$player),
+    x = NULL, y = NULL
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    panel.grid = element_blank(),
+    legend.position = "right",
+    strip.text = element_text(size = 10, face = "bold"),
+    plot.title = element_text(hjust = 0.5)
+  )
+
+print(p)
+```
+
+### Swing Decisions Map by Pitch Type
+
+```{r swing_decisions_by_pitch}
+swing_data <- clean_data %>%
+  filter(Batter == params$player, !is.na(PlateLocSide), !is.na(PlateLocHeight)) %>%
+  mutate(
+    PlateX = PlateLocSide,
+    PlateZ = PlateLocHeight,
+    Decision = ifelse(Swing == TRUE, "Swing", "Take")
+  )
+
+ggplot(swing_data, aes(x = PlateX, y = PlateZ, color = Decision)) +
+  geom_point(alpha = 0.5) +
+  scale_color_manual(values = c("Swing" = "red", "Take" = "blue")) +
+  geom_rect(aes(xmin = -0.83, xmax = 0.83, ymin = 1.5, ymax = 3.5),
+            color = "black", linetype = "dashed", fill = NA, linewidth = 1) +
+  facet_wrap(~TaggedPitchType, ncol = 3) +
+  labs(title = "Swing Decisions by Pitch Type", x = "Horizontal Plate Location (ft)", y = "Plate Height (ft)") +
+  coord_fixed() +
+  theme_minimal()
+```
+
+
+``` {r spray_chart}
+library(ggplot2)
+library(dplyr)
+
+# Filter and calculate spray chart coordinates
+spray_data <- clean_data %>%
+  filter(Batter == params$player,
+         !is.na(Direction),
+         !is.na(Distance),
+         !is.na(PlayResult_clean)) %>%
+  mutate(
+    atbatResult = case_when(
+      PlayResult_clean == "HomeRun"        ~ "HR",
+      PlayResult_clean == "Triple"         ~ "3B",
+      PlayResult_clean == "Double"         ~ "2B",
+      PlayResult_clean == "Single"         ~ "1B",
+      PlayResult_clean %in% c("FieldersChoice", "Sacrifice", "Out") ~ "OUT",
+      TRUE ~ "Other"
+    ),
+    SprayX = Distance * sin(Direction * pi / 180),
+    SprayY = Distance * cos(Direction * pi / 180)
+  )
+
+# Custom colors
+result_colors <- c(
+  "HR" = "red",
+  "3B" = "purple",
+  "2B" = "blue",
+  "1B" = "green",
+  "OUT" = "black"
+)
+
+# Final fixed field overlay function
+gg_field_overlay <- function() {
+  list(
+    # Outfield fence at 400 ft
+    geom_path(data = data.frame(
+      angle = seq(-pi/4, pi/4, length.out = 100)
+    ) %>%
+      mutate(
+        x = 390 * sin(angle),
+        y = 390 * cos(angle)
+      ), aes(x, y), color = "gray70"),
+    
+    # Corrected infield arc at 90 ft
+    geom_path(data = data.frame(
+      angle = seq(-pi/4, pi/4, length.out = 50)
+    ) %>%
+      mutate(
+        x = 90 * sin(angle),
+        y = 90 * cos(angle)
+      ), aes(x, y), color = "gray70"),
+    
+    # Foul lines
+    geom_segment(aes(x = 0, y = 0, xend = 400 * sin(-pi/4), yend = 400 * cos(-pi/4)), color = "gray70"),
+    geom_segment(aes(x = 0, y = 0, xend = 400 * sin(pi/4), yend = 400 * cos(pi/4)), color = "gray70")
+  )
+}
+
+# Build plot safely
+if (nrow(spray_data) > 0) {
+  ggplot(spray_data, aes(x = SprayX, y = SprayY, color = atbatResult)) +
+    gg_field_overlay() +
+    geom_point(size = 3, alpha = 0.8) +
+    scale_color_manual(values = result_colors) +
+    coord_fixed() +
+    labs(
+      title = paste("Spray Chart –", params$player),
+      x = NULL, y = NULL,
+      color = "Result"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text = element_blank(),
+      axis.ticks = element_blank(),
+      panel.grid = element_blank(),
+      legend.position = "left",
+      plot.title = element_text(hjust = 0.5)
+    )
+} else {
+  print("No spray chart data available for this hitter.")
+}
+```
+

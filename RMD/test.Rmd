@@ -1,0 +1,397 @@
+---
+title: "Pitcher Evaluation Report"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    theme: flatly
+    number_sections: true
+    df_print: kable
+params:
+  pitcher: ""
+  extra_note: ""
+---
+
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,       
+  message = FALSE,     
+  warning = FALSE
+)
+library(dplyr)
+library(ggplot2)
+library(kableExtra)
+library(patchwork)
+```
+**Pitcher Notes**
+
+
+```{r summary, warning=FALSE, message=FALSE}
+library(kableExtra)
+
+# Get pitcher summary info
+pitcher_info <- pitching_ultra %>%
+  filter(Pitcher == params$pitcher) %>%
+  left_join(select(clean_data, Pitcher, PitcherTeam), by = "Pitcher") %>%
+  distinct()
+
+# Assign percentile-based color tiers
+pitcher_info <- pitcher_info %>%
+  mutate(
+    color_stuff = case_when(
+      Stuff_plus_percentile >= 80 ~ "green",
+      Stuff_plus_percentile >= 50 ~ "orange",
+      TRUE                        ~ "red"
+    ),
+    color_command = case_when(
+      Command_plus_percentile >= 80 ~ "green",
+      Command_plus_percentile >= 50 ~ "orange",
+      TRUE                          ~ "red"
+    ),
+    color_pitching = case_when(
+      Pitching_plus_percentile >= 80 ~ "green",
+      Pitching_plus_percentile >= 50 ~ "orange",
+      TRUE                           ~ "red"
+    ),
+    color_xpitching = case_when(
+      XPitching_plus_percentile >= 80 ~ "green",
+      XPitching_plus_percentile >= 50 ~ "orange",
+      TRUE                            ~ "red"
+    ),
+    color_ultra = case_when(
+      Pitching_Ultra_percentile >= 80 ~ "green",
+      Pitching_Ultra_percentile >= 50 ~ "orange",
+      TRUE                            ~ "red"
+    )
+  )
+
+# Select table content and color columns
+summary_table <- pitcher_info %>%
+  select(PitcherTeam, avg_StuffPlus, avg_CommandPlus, Pitching_plus, XPitching_plus, Pitching_Ultra, Direction_Type)
+
+colors <- pitcher_info %>%
+  select(color_stuff, color_command, color_pitching, color_xpitching, color_ultra) %>%
+  as.list()
+
+# Apply table formatting with matching color vectors
+summary_table %>%
+  kbl(caption = paste("Performance Summary –", params$pitcher), digits = 1) %>%
+  kable_styling(full_width = FALSE) %>%
+  column_spec(2, color = colors$color_stuff[[1]], bold = TRUE) %>%
+  column_spec(3, color = colors$color_command[[1]], bold = TRUE) %>%
+  column_spec(4, color = colors$color_pitching[[1]], bold = TRUE) %>%
+  column_spec(5, color = colors$color_xpitching[[1]], bold = TRUE) %>%
+  column_spec(6, color = colors$color_ultra[[1]], bold = TRUE)
+
+```
+
+```{r movement-plots-usage, fig.width=15, fig.height=5}
+# PITCHER DATA
+pitcher_data <- clean_data %>%
+  filter(Pitcher == params$pitcher, !is.na(TaggedPitchType), !is.na(HorzBreak), !is.na(InducedVertBreak))
+total_pitches <- nrow(pitcher_data)
+
+pitcher_mov <- pitcher_data %>%
+  group_by(TaggedPitchType) %>%
+  summarise(
+    avg_HorzBrk = mean(HorzBreak, na.rm = TRUE),
+    avg_VertBrk = mean(InducedVertBreak, na.rm = TRUE),
+    pitch_count = n(),
+    .groups = "drop"
+  ) %>%
+  mutate(usage_pct = round(pitch_count / total_pitches, 3))
+
+pitcher_hand <- clean_data %>%
+  filter(Pitcher == params$pitcher, !is.na(PitcherThrows)) %>%
+  distinct(PitcherThrows) %>% pull()
+
+pitcher_pitch_types <- pitcher_data %>%
+  distinct(TaggedPitchType) %>% pull()
+
+# LEAGUE MOVEMENT PLOT
+league_movement <- clean_data %>%
+  filter(
+    !is.na(TaggedPitchType), !is.na(HorzBreak), !is.na(InducedVertBreak),
+    PitcherThrows == pitcher_hand,
+    TaggedPitchType %in% pitcher_pitch_types
+  ) %>%
+  group_by(TaggedPitchType) %>%
+  summarise(
+    avg_HorzBrk = mean(HorzBreak, na.rm = TRUE),
+    avg_VertBrk = mean(InducedVertBreak, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+plot_league <- ggplot() +
+  geom_circle(aes(x0 = 0, y0 = 0, r = 12), color = "gray80", linetype = "dotted") +
+  geom_circle(aes(x0 = 0, y0 = 0, r = 24), color = "gray80", linetype = "dotted") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray60") +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray60") +
+  geom_point(data = league_movement, aes(x = avg_HorzBrk, y = avg_VertBrk, color = TaggedPitchType), size = 3, alpha = 0.3) +
+  geom_point(data = pitcher_mov, aes(x = avg_HorzBrk, y = avg_VertBrk, color = TaggedPitchType, size = usage_pct * 100), shape = 16) +
+  coord_fixed(xlim = c(-25, 25), ylim = c(-25, 25)) +
+  labs(title = "Movement vs League", x = "Horizontal Break (in)", y = "Vertical Break (in)", color = "Pitch Type") +
+  scale_size_continuous(name = "Usage %") +
+  theme_minimal() + theme(legend.position = "none")
+
+# SIMILAR PITCHERS MOVEMENT
+pitcher_profile <- pitcher_profiles %>% filter(Pitcher == params$pitcher)
+pitcher_height <- clean_data %>%
+  filter(Pitcher == params$pitcher, !is.na(RelHeight)) %>%
+  summarise(avg_height = mean(RelHeight)) %>% pull()
+
+similar_pitchers <- clean_data %>%
+  inner_join(pitcher_profiles, by = "Pitcher") %>%
+  filter(
+    Arm_Slot == pitcher_profile$Arm_Slot[1],
+    PitcherThrows == pitcher_hand,
+    !is.na(RelHeight),
+    abs(RelHeight - pitcher_height) <= 0.2,
+    TaggedPitchType %in% pitcher_pitch_types,
+    !is.na(HorzBreak), !is.na(InducedVertBreak)
+  ) %>%
+  group_by(TaggedPitchType) %>%
+  summarise(
+    avg_HorzBrk = mean(HorzBreak, na.rm = TRUE),
+    avg_VertBrk = mean(InducedVertBreak, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+plot_similar <- ggplot() +
+  geom_circle(aes(x0 = 0, y0 = 0, r = 12), color = "gray80", linetype = "dotted") +
+  geom_circle(aes(x0 = 0, y0 = 0, r = 24), color = "gray80", linetype = "dotted") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray60") +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray60") +
+  geom_point(data = similar_pitchers, aes(x = avg_HorzBrk, y = avg_VertBrk, color = TaggedPitchType), size = 3, alpha = 0.3) +
+  geom_point(data = pitcher_mov, aes(x = avg_HorzBrk, y = avg_VertBrk, color = TaggedPitchType, size = usage_pct * 100), shape = 16) +
+  coord_fixed(xlim = c(-25, 25), ylim = c(-25, 25)) +
+  labs(title = "Movement vs Similar Pitchers", x = "Horizontal Break (in)", y = "Vertical Break (in)", color = "Pitch Type") +
+  scale_size_continuous(name = "Usage %") +
+  theme_minimal() + theme(legend.position = "none")
+
+# PITCH USAGE PLOT
+pitch_usage <- pitcher_data %>%
+  group_by(TaggedPitchType) %>%
+  summarise(pitch_count = n(), .groups = "drop") %>%
+  mutate(pct = round(pitch_count / sum(pitch_count) * 100, 1)) %>%
+  arrange(desc(pct))
+
+plot_usage <- ggplot(pitch_usage, aes(x = reorder(TaggedPitchType, -pct), y = pct, fill = TaggedPitchType)) +
+  geom_col(width = 0.6) +
+  geom_text(aes(label = paste0(pct, "%")), vjust = -0.5, size = 3) +
+  labs(title = "Pitch Usage (%)", x = NULL, y = "Percent") +
+  theme_minimal() +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 45, hjust = 1))
+
+# COMBINE SIDE-BY-SIDE
+(plot_league | plot_similar | plot_usage) +
+  plot_annotation(title = paste("Pitch Movement & Usage –", params$pitcher))
+```
+
+```{r pitch-heatmaps}
+library(ggplot2)
+
+pitch_locations <- clean_data %>%
+  filter(Pitcher == params$pitcher, !is.na(PlateLocSide), !is.na(PlateLocHeight), !is.na(TaggedPitchType))
+
+ggplot(pitch_locations, aes(x = PlateLocSide, y = PlateLocHeight)) +
+  geom_density_2d_filled(contour_var = "ndensity", alpha = 0.8) +
+  
+  # Strike zone overlay
+  geom_rect(aes(xmin = -0.95, xmax = 0.95, ymin = 1.5, ymax = 3.5),
+            fill = NA, color = "black", linetype = "dashed", size = 1) +
+  
+  facet_wrap(~ TaggedPitchType) +
+  coord_fixed() +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    strip.text = element_text(size = 10, face = "bold"),
+    plot.title = element_text(hjust = 0.5)
+  ) +
+  labs(
+    title = paste("Pitch Location Heatmaps –", params$pitcher),
+    x = "Horizontal Plate Location (ft)",
+    y = "Vertical Plate Location (ft)",
+    fill = "Density"
+  )
+
+```
+```{r command-zone-by-pitch}
+# Use params$pitcher
+pitcher_locs <- clean_data %>%
+  filter(Pitcher == params$pitcher,
+         !is.na(PlateLocSide), !is.na(PlateLocHeight), !is.na(TaggedPitchType), !is.na(PitcherThrows)) %>%
+  mutate(
+    TaggedPitchType = tolower(TaggedPitchType),
+    is_LHP = PitcherThrows == "Left",
+    
+    is_competitive = PlateLocSide >= -1.5 & PlateLocSide <= 1.5 &
+                     PlateLocHeight >= 1.2 & PlateLocHeight <= 4.0,
+    
+    location_rating = case_when(
+      # Ideal Zones
+      TaggedPitchType == "four-seam" &
+        (PlateLocHeight >= 3.2 | (abs(PlateLocSide) >= 0.7 & abs(PlateLocSide) <= 0.95)) &
+        is_competitive ~ "ideal",
+      
+      TaggedPitchType == "sinker" &
+        (PlateLocHeight <= 2.2 | (abs(PlateLocSide) >= 0.7 & abs(PlateLocSide) <= 0.95)) & 
+        is_competitive ~ "ideal",
+      
+      TaggedPitchType == "slider" &
+        PlateLocHeight <= 2 &
+        ((PlateLocSide < 0 & !is_LHP) | (PlateLocSide > 0 & is_LHP)) &
+        is_competitive ~ "ideal",
+      
+      TaggedPitchType == "changeup" &
+        PlateLocHeight <= 2 & is_competitive ~ "ideal",
+      
+      TaggedPitchType == "curveball" &
+        PlateLocHeight <= 2 & is_competitive ~ "ideal",
+      
+      TaggedPitchType == "cutter" &
+        PlateLocHeight >= 2.5 &
+        abs(PlateLocSide) >= 0.6 & abs(PlateLocSide) <= 1.1 &
+        is_competitive ~ "ideal",
+      
+      # Bad: way outside or heart of plate
+      PlateLocSide < -1.6 | PlateLocSide > 1.6 |
+        PlateLocHeight < 1.0 | PlateLocHeight > 4.2 ~ "bad",
+      
+      abs(PlateLocSide) <= 0.3 & PlateLocHeight >= 2.2 & PlateLocHeight <= 3.2 ~ "bad",
+      
+      # Everything else
+      TRUE ~ "non-ideal"
+    )
+  )
+
+ggplot(pitcher_locs, aes(x = PlateLocSide, y = PlateLocHeight, fill = location_rating)) +
+  geom_point(alpha = 0.7, shape = 21, color = "black", size = 2) +
+  geom_rect(aes(xmin = -0.95, xmax = 0.95, ymin = 1.5, ymax = 3.5),
+            fill = NA, color = "black", linetype = "dashed") +
+  facet_wrap(~ TaggedPitchType) +
+  scale_fill_manual(values = c("ideal" = "darkgreen", "non-ideal" = "gold", "bad" = "red")) +
+  coord_fixed() +
+  theme_minimal() +
+  labs(
+    title = paste("Command Evaluation –", params$pitcher),
+    x = "Plate Location X (ft)",
+    y = "Plate Location Y (ft)",
+    fill = "Rating"
+  )
+
+```
+```{r pitch-characteristics-table}
+library(kableExtra)
+
+# Step 1: Summarize pitch metrics (add SpinRate)
+pitch_summary <- clean_data %>%
+  filter(Pitcher == params$pitcher,
+         !is.na(RelSpeed), !is.na(HorzBreak), !is.na(InducedVertBreak),
+         !is.na(SpinRate), !is.na(TaggedPitchType)) %>%
+  group_by(TaggedPitchType) %>%
+  summarise(
+    avg_velo = round(mean(RelSpeed, na.rm = TRUE), 1),
+    avg_horz = round(mean(HorzBreak, na.rm = TRUE), 1),
+    avg_vert = round(mean(InducedVertBreak, na.rm = TRUE), 1),
+    avg_spin = round(mean(SpinRate, na.rm = TRUE), 0),   # <- NEW
+    count = n(),
+    .groups = "drop"
+  ) %>%
+  mutate(usage_pct = round(count / sum(count) * 100, 1))
+
+# Step 2: Add Stuff+ and Command+ values
+pitch_grades <- pitching_plus %>%
+  filter(Pitcher == params$pitcher) %>%
+  select(TaggedPitchType, Stuff_plus, Command_plus)
+
+# Step 3: Join and assign color tiers
+pitch_summary <- pitch_summary %>%
+  left_join(pitch_grades, by = "TaggedPitchType") %>%
+  mutate(
+    Stuff_plus = round(Stuff_plus, 1),
+    Command_plus = round(Command_plus, 1),
+    Stuff_color = case_when(
+      Stuff_plus >= 120 ~ "green",
+      Stuff_plus >= 100 ~ "orange",
+      TRUE              ~ "red"
+    ),
+    Command_color = case_when(
+      Command_plus >= 120 ~ "green",
+      Command_plus >= 100 ~ "orange",
+      TRUE                ~ "red"
+    )
+  )
+
+# Step 4: Filter and select columns (include Spin)
+pitch_table <- pitch_summary %>%
+  filter(!is.na(Stuff_plus), !is.na(Command_plus)) %>%
+  select(TaggedPitchType, avg_velo, avg_spin, avg_horz, avg_vert, usage_pct, Stuff_plus, Command_plus)
+
+colors_stuff <- pitch_summary %>%
+  filter(!is.na(Stuff_plus), !is.na(Command_plus)) %>%
+  pull(Stuff_color)
+
+colors_command <- pitch_summary %>%
+  filter(!is.na(Stuff_plus), !is.na(Command_plus)) %>%
+  pull(Command_color)
+
+# Step 5: Display with color (shift column numbers due to new Spin column)
+pitch_table %>%
+  kbl(caption = paste("Pitch Characteristics –", params$pitcher), digits = 1) %>%
+  kable_styling(full_width = FALSE) %>%
+  column_spec(7, color = colors_stuff, bold = TRUE) %>%  # Stuff_plus now column 7
+  column_spec(8, color = colors_command, bold = TRUE)    # Command_plus now column 8
+
+```
+```{r pitch-results-breakdown}
+results_table <- clean_data %>%
+  filter(
+    Pitcher == params$pitcher,
+    !is.na(TaggedPitchType)
+  ) %>%
+  mutate(
+    is_swing = PitchCall %in% c("StrikeSwinging", "FoulBall", "InPlay"),
+    is_whiff = PitchCall == "StrikeSwinging",
+    is_in_play = PitchCall == "InPlay",
+    is_hard_hit = (ExitSpeed >= 95),
+    is_gb = is_in_play & (Angle < 10),
+    is_chase = is_swing & (
+      PlateLocSide < -0.83 | PlateLocSide > 0.83 | 
+      PlateLocHeight < 1.5 | PlateLocHeight > 3.5
+    )
+  ) %>%
+  group_by(TaggedPitchType) %>%
+  summarise(
+    pitches = n(),
+    swings = sum(is_swing, na.rm = TRUE),
+    whiffs = sum(is_whiff, na.rm = TRUE),
+    in_play = sum(is_in_play, na.rm = TRUE),
+    hard_hit = sum(is_hard_hit, na.rm = TRUE),
+    ground_balls = sum(is_gb, na.rm = TRUE),
+    chases = sum(is_chase, na.rm = TRUE),
+    
+    whiff_pct = ifelse(swings > 0, round(100 * whiffs / swings, 1), NA_real_),
+    chase_pct = ifelse(swings > 0, round(100 * chases / swings, 1), NA_real_),
+    gb_pct = ifelse(in_play > 0, round(100 * ground_balls / in_play, 1), NA_real_),
+    in_play_pct = round(100 * in_play / pitches, 1),
+    hard_hit_pct = ifelse(in_play > 0, round(100 * hard_hit / in_play, 1), NA_real_),
+    avg_ev = round(mean(ExitSpeed[is_in_play], na.rm = TRUE), 1),
+    .groups = "drop"
+  ) %>%
+  # Optional: replace NA with —
+  mutate(
+    whiff_pct = ifelse(is.na(whiff_pct), "—", whiff_pct),
+    chase_pct = ifelse(is.na(chase_pct), "—", chase_pct),
+    gb_pct = ifelse(is.na(gb_pct), "—", gb_pct),
+    in_play_pct = ifelse(is.na(in_play_pct), "—", in_play_pct),
+    hard_hit_pct = ifelse(is.na(hard_hit_pct), "—", hard_hit_pct),
+    avg_ev = ifelse(is.na(avg_ev), "—", avg_ev)
+  )
+
+knitr::kable(results_table, caption = paste("Pitch Outcome Metrics –", params$pitcher))
+```

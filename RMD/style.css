@@ -1,0 +1,23 @@
+body {
+  background: linear-gradient(to right, white 0%, white 15%, white 85%, white 100%);
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  
+  background-image: url("miamifl.png");
+  background-repeat: no-repeat;
+  background-position: top right;
+  background-size: 180px;  
+  opacity: 1;
+}
+
+p {
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.table caption {
+  color: #black;         
+  font-size: 16px;
+  font-weight: bold;
+  text-align: left;
+  padding-bottom: 5px;
+}

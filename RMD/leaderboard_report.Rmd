@@ -1,0 +1,47 @@
+---
+title: "Top Pitchers Leaderboard – Pitching Ultra"
+author: "Inaki_Sardina"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+library(dplyr)
+library(ggplot2)
+library(readr)
+library(DT)
+```
+
+```{r load-and-filter}
+# Load shortlist (update path if needed)
+shortlist <- read_csv("/Users/kaks/Desktop/CanesBaseball/PitchingUltra/Data/Transfer Portal Players - Pitching.csv")
+
+# Rename if needed
+if ("Name" %in% colnames(shortlist)) {
+  shortlist <- shortlist %>% rename(Pitcher = Name)
+}
+
+# Filter to shortlist and pick best Pitching_Ultra season per pitcher
+matched_pitchers <- pitching_ultra %>%
+  semi_join(shortlist, by = "Pitcher") %>%                     # Match only pitchers in shortlist
+  filter(total_pitches >= 200) %>%
+  left_join(select(shortlist, Pitcher, G, BF), by = "Pitcher") %>%  # Add BF and G from shortlist
+  filter(G > 0, BF / G <= 8) %>%                               # Reliever filter
+  group_by(Pitcher) %>%
+  slice_max(order_by = Pitching_Ultra, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  arrange(desc(Pitching_Ultra))
+```
+
+```{r interactive-table}
+datatable(
+  matched_pitchers %>%
+    select(Pitcher, avg_StuffPlus, XPitching_plus, Pitching_Ultra),
+  options = list(pageLength = 15),
+  rownames = FALSE,
+  caption = "⬇️ Click to sort by any column"
+)
+```

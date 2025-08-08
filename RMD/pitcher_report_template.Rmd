@@ -1,0 +1,1025 @@
+---
+title: "`r paste('Pitcher Report –', params$pitcher)`"
+output:
+  html_document:
+    toc: false
+    theme: flatly
+    number_sections: false
+    df_print: kable
+    css: style.css
+params:
+  pitcher: ""
+  extra_note: ""
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  message = FALSE,
+  warning = FALSE
+)
+library(dplyr)
+library(ggplot2)
+library(kableExtra)
+library(patchwork)
+```
+
+<div style="
+  background-color: #f8f9fa;         
+  border-left: 5px solid #f17421;    
+  padding: 15px 20px;                
+  margin-top: 15px;
+  margin-bottom: 20px;               
+  font-size: 16px;
+  line-height: 1.6;                  
+  border-radius: 6px;                
+">
+  <strong>Pitcher Notes</strong>
+
+  Right-handed pitcher with an east-to-west profile built around a sinker/slider/curveball mix. His primary pitch is a <strong>sinker</strong> (89.8 MPH, 54.2% usage)  
+  ... In 2025, he posted a <strong>25.9% K%</strong> and <strong>10.2% BB%</strong>, with a <strong>3.70 FIP</strong>.
+</div>
+
+## Stats by Year {.tabset}
+```{r filter-all-seasons, include=FALSE}
+filtered_data_2024 <- clean_data %>% filter(Pitcher == params$pitcher, year == 2024)
+has_data_2024 <- nrow(filtered_data_2024) > 0
+
+filtered_data_2025 <- clean_data %>% filter(Pitcher == params$pitcher, year == 2025)
+has_data_2025 <- nrow(filtered_data_2025) > 0
+
+filtered_data_career <- clean_data %>% filter(Pitcher == params$pitcher)
+has_data_career <- nrow(filtered_data_career) > 0
+
+filtered_behavior_summary <- count_behavior_summary_by_year %>%
+  filter(Pitcher == params$pitcher)
+```
+
+### Carrer 
+
+```{r render-career, results='asis'}
+if (has_data_career) {
+  filtered_data <- filtered_data_career
+  season_label <- "Career"
+
+} else {
+  cat("")  # do nothing
+}
+```
+
+```{r filter-career}
+filtered_data <- clean_data %>% filter(Pitcher == params$pitcher)
+filtered_pitching_ultra <- pitching_ultra %>% filter(Pitcher == params$pitcher, year == "Overall")
+filtered_pitching_plus <- pitching_plus %>%
+  filter(Pitcher == params$pitcher) %>%
+  group_by(Pitcher, TaggedPitchType) %>%
+  summarise(
+    Stuff_plus = weighted.mean(Stuff_plus, pitch_count, na.rm = TRUE),
+    Command_plus = weighted.mean(Command_plus, pitch_count, na.rm = TRUE),
+    .groups = "drop"
+  )
+season_label <- "Career"
+```
+
+```{r prep-league-movement-career}
+pitcher_mov <- filtered_data %>%
+  filter(!is.na(TaggedPitchType), !is.na(HorzBreak), !is.na(InducedVertBreak)) %>%
+  group_by(TaggedPitchType) %>%
+  summarise(
+    avg_HorzBrk = mean(HorzBreak, na.rm = TRUE),
+    avg_VertBrk = mean(InducedVertBreak, na.rm = TRUE),
+    pitch_count = n(),
+    .groups = "drop"
+  ) %>%
+  mutate(usage_pct = round(pitch_count / sum(pitch_count), 3))
+
+pitcher_hand <- filtered_data %>%
+  filter(!is.na(PitcherThrows)) %>%
+  distinct(PitcherThrows) %>%
+  pull()
+
+pitcher_pitch_types <- pitcher_mov$TaggedPitchType
+
+league_movement <- clean_data %>%
+  filter(
+    !is.na(TaggedPitchType), !is.na(HorzBreak), !is.na(InducedVertBreak),
+    PitcherThrows == pitcher_hand,
+    TaggedPitchType %in% pitcher_pitch_types
+  ) %>%
+  group_by(TaggedPitchType) %>%
+  summarise(
+    avg_HorzBrk = mean(HorzBreak, na.rm = TRUE),
+    avg_VertBrk = mean(InducedVertBreak, na.rm = TRUE),
+    .groups = "drop"
+  )
+```
+
+```{r pitcher-results-career}
+career_pitcher_stats <- pitcher_results %>%
+  filter(Pitcher == params$pitcher) %>%
+  group_by(Pitcher) %>%
+  summarise(
+    G = sum(G, na.rm = TRUE),
+    PA = sum(PA, na.rm = TRUE),
+    BB = sum(BB, na.rm = TRUE),
+    K = sum(K, na.rm = TRUE),
+    HBP = sum(HBP, na.rm = TRUE),
+    Hits = sum(Hits, na.rm = TRUE),
+    HR = sum(HR, na.rm = TRUE),
+    Outs = sum(Outs, na.rm = TRUE),
+    IP_display = paste0(floor(Outs / 3), ".", Outs %% 3),
+    IP_numeric = Outs / 3,
+    WHIP = round((BB + HBP + Hits) / (Outs / 3), 2),
+    `BB%` = round(100 * BB / PA, 1),
+    `K%` = round(100 * K / PA, 1),
+    FIP = round(((13 * HR + 3 * (BB + HBP) - 2 * K) / (Outs / 3)) + 3.1, 2),
+    .groups = "drop"
+  ) %>%
+  transmute(
+    `IP` = IP_display,
+    `G` = G,
+    `PA` = PA,
+    `H` = Hits,
+    `HR` = HR,
+    `BB` = BB,
+    `BB%` = `BB%`,
+    `K%` = `K%`,
+    `WHIP` = WHIP,
+    `FIP` = FIP
+  )
+
+# Display with formatting
+career_pitcher_stats %>%
+  kbl(caption = paste0("<span style='color:#1d3557;'>Pitching Results Summary – ", params$pitcher, " (Career)</span>"), escape = FALSE) %>%
+  kable_styling(full_width = FALSE)
+```
+
+```{r summary-career}
+if (nrow(filtered_pitching_ultra) > 0) {
+  summary_table <- filtered_pitching_ultra %>%
+    transmute(
+      `Stuff +` = round(avg_StuffPlus, 1),
+      `Command +` = round(avg_CommandPlus, 1),
+      `Pitching +` = round(Pitching_plus, 1),
+      `xPitching +` = round(XPitching_plus, 1),
+      `Pitching Ultra` = round(Pitching_Ultra, 1)
+    )
+
+  summary_table %>%
+    kbl(
+      caption = paste("Performance Summary –", params$pitcher, "- Career"),
+      digits = 1
+    ) %>%
+    kable_styling(full_width = FALSE)
+} else {
+  cat("No career summary data available for this pitcher.\n")
+}
+```
+
+```{r pitch-characteristics-table-career}
+pitch_summary <- clean_data %>%
+  filter(Pitcher == params$pitcher,
+         !is.na(RelSpeed), !is.na(HorzBreak), !is.na(InducedVertBreak),
+         !is.na(SpinRate), !is.na(TaggedPitchType)) %>%
+  group_by(TaggedPitchType) %>%
+  summarise(
+    avg_velo = round(mean(RelSpeed, na.rm = TRUE), 1),
+    avg_horz = round(mean(HorzBreak, na.rm = TRUE), 1),
+    avg_vert = round(mean(InducedVertBreak, na.rm = TRUE), 1),
+    avg_spin = round(mean(SpinRate, na.rm = TRUE), 0),
+    count = n(),
+    .groups = "drop"
+  ) %>%
+  mutate(usage_pct = round(count / sum(count) * 100, 1))
+
+pitch_grades <- pitching_plus %>%
+  filter(Pitcher == params$pitcher) %>%
+  group_by(TaggedPitchType) %>%
+  summarise(
+    Stuff_plus = round(mean(Stuff_plus, na.rm = TRUE), 1),
+    Command_plus = round(mean(Command_plus, na.rm = TRUE), 1),
+    .groups = "drop"
+  )
+
+pitch_table <- pitch_summary %>%
+  left_join(pitch_grades, by = "TaggedPitchType") %>%
+  filter(!is.na(Stuff_plus), !is.na(Command_plus)) %>%
+  select(`Pitch Type` = TaggedPitchType,
+         `Velo (mph)` = avg_velo,
+         `Spin (rpm)` = avg_spin,
+         `Horz Break (in)` = avg_horz,
+         `Vert Break (in)` = avg_vert,
+         `Usage (%)` = usage_pct,
+         `Stuff+` = Stuff_plus,
+         `Command+` = Command_plus)
+
+pitch_table %>%
+  kbl(
+    caption = paste("Pitch Characteristics –", params$pitcher, "- Career"),
+    digits = 1
+  ) %>%
+  kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover"))
+```
+
+<details>
+<summary><strong>Pitch-Outcome-Breakdown – Career</strong></summary>
+
+```{r pitch-outcome-breakdown-career}
+results_table <- filtered_data %>%
+  filter(!is.na(TaggedPitchType)) %>%
+  mutate(
+    is_swing = PitchCall %in% c("StrikeSwinging", "FoulBall", "InPlay"),
+    is_whiff = PitchCall == "StrikeSwinging",
+    is_in_play = PitchCall == "InPlay",
+    is_hard_hit = (ExitSpeed >= 95),
+    is_gb = is_in_play & (Angle < 10),
+    is_chase = is_swing & (
+      PlateLocSide < -0.83 | PlateLocSide > 0.83 | 
+      PlateLocHeight < 1.5 | PlateLocHeight > 3.5
+    )
+  ) %>%
+  group_by(TaggedPitchType) %>%
+  summarise(
+    pitches = n(),
+    swings = sum(is_swing, na.rm = TRUE),
+    whiffs = sum(is_whiff, na.rm = TRUE),
+    in_play = sum(is_in_play, na.rm = TRUE),
+    hard_hit = sum(is_hard_hit, na.rm = TRUE),
+    ground_balls = sum(is_gb, na.rm = TRUE),
+    chases = sum(is_chase, na.rm = TRUE),
+    
+    whiff_pct = ifelse(swings > 0, round(100 * whiffs / swings, 1), NA_real_),
+    chase_pct = ifelse(swings > 0, round(100 * chases / swings, 1), NA_real_),
+    gb_pct = ifelse(in_play > 0, round(100 * ground_balls / in_play, 1), NA_real_),
+    in_play_pct = round(100 * in_play / pitches, 1),
+    hard_hit_pct = ifelse(in_play > 0, round(100 * hard_hit / in_play, 1), NA_real_),
+    avg_ev = round(mean(ExitSpeed[is_in_play], na.rm = TRUE), 1),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    whiff_pct = ifelse(is.na(whiff_pct), "—", whiff_pct),
+    chase_pct = ifelse(is.na(chase_pct), "—", chase_pct),
+    gb_pct = ifelse(is.na(gb_pct), "—", gb_pct),
+    in_play_pct = ifelse(is.na(in_play_pct), "—", in_play_pct),
+    hard_hit_pct = ifelse(is.na(hard_hit_pct), "—", hard_hit_pct),
+    avg_ev = ifelse(is.na(avg_ev), "—", avg_ev)
+  )
+
+results_table %>%
+  rename(
+    `Pitch Type` = TaggedPitchType,
+    `Pitches` = pitches,
+    `Swings` = swings,
+    `Whiffs` = whiffs,
+    `In-Play` = in_play,
+    `HH` = hard_hit,
+    `GB` = ground_balls,
+    `Chases` = chases,  
+    `Whiff %` = whiff_pct,
+    `Chase %` = chase_pct,
+    `In-Play %` = in_play_pct,
+    `HH %` = hard_hit_pct,
+    `GB %` = gb_pct,
+    `Avg EV` = avg_ev
+  ) %>%
+  knitr::kable(
+    caption = paste("Pitch Outcome Metrics –", params$pitcher, "-", season_label),
+    digits = 1
+  ) %>%
+  kableExtra::kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover"))
+```
+</details>
+
+
+<details>
+<summary><strong>Count Behavior Summary – Career</strong></summary>
+
+```{r behavior-summary-Overall, results='asis'}
+behavior_table <- filtered_behavior_summary %>%
+  filter(year == "Overall") %>%
+  transmute(
+    `First-Pitch Strike %` = round(FPS_percent * 100, 1),
+    `K% After Falling Behind` = round(K_Rate_Behind * 100, 1),
+    `BB% After Getting Ahead` = round(BB_Rate_Ahead * 100, 1),
+    `Short PAs (<5 pitches)` = round(Short_PA_Rate * 100, 1)
+  )
+
+if (nrow(behavior_table) > 0) {
+  behavior_table %>%
+    kbl(caption = paste("Count Behavior Summary –", params$pitcher, "-", "Career")) %>%
+    kable_styling(full_width = FALSE)
+} else {
+  cat("No count behavior data available for this pitcher.\n")
+}
+```
+</details> 
+
+<details>
+<summary><strong>Most Used Pitch by Count – `r season_label`</strong></summary>
+
+```{r most-used-pitch-plot, echo=FALSE, message=FALSE, warning=FALSE}
+library(ggplot2)
+
+pitch_usage_plot_data <- most_used_pitch_by_count %>%
+  filter(Pitcher == params$pitcher, year == "Overall")
+
+if (nrow(pitch_usage_plot_data) > 0) {
+  ggplot(pitch_usage_plot_data, aes(x = Count, y = Usage_Percent, fill = Most_Used_Pitch)) +
+    geom_col(width = 0.7) +
+    geom_text(aes(label = paste0(Usage_Percent, "%")), vjust = -0.5, size = 3) +
+    labs(
+      title = paste("Most Used Pitch by Count –", params$pitcher, "-", "Career"),
+      x = "Count",
+      y = "Usage %",
+      fill = "Pitch Type"
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(
+      legend.position = "bottom",
+      plot.title = element_text(face = "bold", hjust = 0.5)
+    )
+} else {
+  cat("No pitch usage data available for this pitcher and season.\n")
+}
+```
+</details> 
+
+
+```{r plot-movement-vs-league-career, fig.width=10, fig.height=6}
+ggplot() +
+  geom_circle(aes(x0 = 0, y0 = 0, r = 12), color = "gray80", linetype = "dotted") +
+  geom_circle(aes(x0 = 0, y0 = 0, r = 24), color = "gray80", linetype = "dotted") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray60") +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray60") +
+  geom_point(data = league_movement, aes(x = avg_HorzBrk, y = avg_VertBrk, color = TaggedPitchType), size = 3, alpha = 0.3) +
+  geom_point(data = pitcher_mov, aes(x = avg_HorzBrk, y = avg_VertBrk, color = TaggedPitchType, size = usage_pct * 100), shape = 16) +
+  coord_fixed(xlim = c(-25, 25), ylim = c(-25, 25)) +
+  labs(title = paste("Pitch Movement vs League –", params$pitcher, "-", season_label),
+       x = "Horizontal Break (in)", y = "Vertical Break (in)", color = "Pitch Type") +
+  scale_size_continuous(name = "Usage %") +
+  theme_minimal()
+```
+
+```{r plots-career, fig.width=10, fig.height=5}
+# Pitch Usage
+pitcher_mov <- filtered_data %>%
+  filter(!is.na(TaggedPitchType)) %>%
+  group_by(TaggedPitchType) %>%
+  summarise(pitch_count = n(), .groups = "drop") %>%
+  mutate(usage_pct = round(pitch_count / sum(pitch_count) * 100, 1))
+
+ggplot(pitcher_mov, aes(x = reorder(TaggedPitchType, -usage_pct), y = usage_pct, fill = TaggedPitchType)) +
+  geom_col(width = 0.6) +
+  geom_text(aes(label = paste0(usage_pct, "%")), vjust = -0.5) +
+  labs(title = paste("Pitch Usage –", season_label), x = NULL, y = "Usage %") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), plot.title = element_text(size = 16))
+```
+
+```{r heatmap-career, fig.width=10, fig.height=6}
+heatmap_data <- filtered_data %>%
+  filter(!is.na(PlateLocSide), !is.na(PlateLocHeight), !is.na(TaggedPitchType))
+
+ggplot(heatmap_data, aes(x = PlateLocSide, y = PlateLocHeight)) +
+  geom_density_2d_filled(alpha = 0.8) +
+  geom_rect(aes(xmin = -0.95, xmax = 0.95, ymin = 1.5, ymax = 3.5),
+            fill = NA, color = "black", linetype = "dashed") +
+  facet_wrap(~ TaggedPitchType, ncol = 3) +
+  coord_fixed() +
+  theme_minimal() +
+  labs(title = paste("Pitch Location Heatmaps –", season_label), x = "PlateLocSide", y = "PlateLocHeight")
+```
+
+```{r command-map-career, fig.width=10, fig.height=6}
+command_data <- filtered_data %>%
+  filter(!is.na(PlateLocSide), !is.na(PlateLocHeight), !is.na(TaggedPitchType), !is.na(PitcherThrows)) %>%
+  mutate(
+    is_LHP = PitcherThrows == "Left",
+    is_competitive = PlateLocSide >= -1.5 & PlateLocSide <= 1.5 & PlateLocHeight >= 1.2 & PlateLocHeight <= 4.0,
+    location_rating = case_when(
+      TaggedPitchType == "four-seam" & (PlateLocHeight >= 3.2 | abs(PlateLocSide) >= 0.7) & is_competitive ~ "ideal",
+      TaggedPitchType == "sinker" & (PlateLocHeight <= 2.2 | abs(PlateLocSide) >= 0.7) & is_competitive ~ "ideal",
+      TaggedPitchType == "slider" & PlateLocHeight <= 2 & ((PlateLocSide < 0 & !is_LHP) | (PlateLocSide > 0 & is_LHP)) & is_competitive ~ "ideal",
+      TaggedPitchType == "changeup" & PlateLocHeight <= 2 & is_competitive ~ "ideal",
+      TaggedPitchType == "curveball" & PlateLocHeight <= 2 & is_competitive ~ "ideal",
+      TaggedPitchType == "cutter" & PlateLocHeight >= 2.5 & abs(PlateLocSide) >= 0.6 & abs(PlateLocSide) <= 1.1 & is_competitive ~ "ideal",
+      PlateLocSide < -1.6 | PlateLocSide > 1.6 | PlateLocHeight < 1.0 | PlateLocHeight > 4.2 ~ "bad",
+      abs(PlateLocSide) <= 0.3 & PlateLocHeight >= 2.2 & PlateLocHeight <= 3.2 ~ "bad",
+      TRUE ~ "non-ideal"
+    )
+  )
+
+ggplot(command_data, aes(x = PlateLocSide, y = PlateLocHeight, fill = location_rating)) +
+  geom_point(alpha = 0.7, shape = 21, color = "black", size = 2) +
+  geom_rect(aes(xmin = -0.95, xmax = 0.95, ymin = 1.5, ymax = 3.5), fill = NA, color = "black", linetype = "dashed") +
+  facet_wrap(~ TaggedPitchType, ncol = 3) +
+  scale_fill_manual(values = c("ideal" = "darkgreen", "non-ideal" = "gold", "bad" = "red")) +
+  coord_fixed() +
+  theme_minimal() +
+  labs(title = paste("Command Evaluation –", season_label), x = "Plate Location X", y = "Plate Location Y")
+```
+
+### 2025
+
+```{r render-2025, results='asis'}
+if (has_data_2025) {
+  filtered_data <- filtered_data_2025
+  season_label <- "2025"
+
+  # INSERT ALL your 2025 blocks here
+
+} else {
+  cat("")  # do nothing
+}
+```
+
+```{r movement-vs-league-2025}
+pitcher_mov <- filtered_data %>%
+  filter(!is.na(TaggedPitchType), !is.na(HorzBreak), !is.na(InducedVertBreak)) %>%
+  group_by(TaggedPitchType) %>%
+  summarise(
+    avg_HorzBrk = mean(HorzBreak, na.rm = TRUE),
+    avg_VertBrk = mean(InducedVertBreak, na.rm = TRUE),
+    pitch_count = n(),
+    .groups = "drop"
+  ) %>%
+  mutate(usage_pct = pitch_count / sum(pitch_count))
+
+pitcher_hand <- unique(filtered_data$PitcherThrows)
+pitcher_pitch_types <- pitcher_mov$TaggedPitchType
+
+league_movement <- clean_data %>%
+  filter(
+    !is.na(TaggedPitchType), !is.na(HorzBreak), !is.na(InducedVertBreak),
+    PitcherThrows == pitcher_hand,
+    TaggedPitchType %in% pitcher_pitch_types
+  ) %>%
+  group_by(TaggedPitchType) %>%
+  summarise(
+    avg_HorzBrk = mean(HorzBreak, na.rm = TRUE),
+    avg_VertBrk = mean(InducedVertBreak, na.rm = TRUE),
+    .groups = "drop"
+  )
+```
+
+```{r summary-2025}
+if (has_data_2025) {
+  pitcher_info <- pitching_ultra %>%
+    mutate(year = as.character(year)) %>%
+    filter(Pitcher == params$pitcher, year == "2025") %>%
+    left_join(
+      clean_data %>%
+        mutate(year = as.character(year)) %>%
+        select(Pitcher, year, PitcherTeam),
+      by = c("Pitcher", "year")
+    ) %>%
+    left_join(
+      select(conference_data, Trackman, `Ncaa Name`),
+      by = c("PitcherTeam" = "Trackman")
+    ) %>%
+    distinct()
+
+  summary_table <- pitcher_info %>%
+    select(
+      `School` = `Ncaa Name`,
+      `Stuff +` = avg_StuffPlus,
+      `Command +` = avg_CommandPlus,
+      `Pitching +` = Pitching_plus,
+      `xPitching +` = XPitching_plus,
+      `Pitching Ultra` = Pitching_Ultra
+    )
+
+  summary_table %>%
+    kbl(caption = paste("Performance Summary –", params$pitcher, "- 2025"), digits = 1) %>%
+    kable_styling(full_width = FALSE)
+} else {
+  cat("No 2025 summary data available for this pitcher.\n")
+}
+```
+
+```{r pitcher-results-2025}
+career_pitcher_stats <- pitcher_results %>%
+  filter(Pitcher == params$pitcher, year == "2025") %>%
+  group_by(Pitcher) %>%
+  summarise(
+    G = sum(G, na.rm = TRUE),
+    PA = sum(PA, na.rm = TRUE),
+    BB = sum(BB, na.rm = TRUE),
+    K = sum(K, na.rm = TRUE),
+    HBP = sum(HBP, na.rm = TRUE),
+    Hits = sum(Hits, na.rm = TRUE),
+    HR = sum(HR, na.rm = TRUE),
+    Outs = sum(Outs, na.rm = TRUE),
+    IP_display = paste0(floor(Outs / 3), ".", Outs %% 3),
+    IP_numeric = Outs / 3,
+    WHIP = round((BB + HBP + Hits) / (Outs / 3), 2),
+    `BB%` = round(100 * BB / PA, 1),
+    `K%` = round(100 * K / PA, 1),
+    FIP = round(((13 * HR + 3 * (BB + HBP) - 2 * K) / (Outs / 3)) + 3.1, 2),
+    .groups = "drop"
+  ) %>%
+  select(`IP` = IP_display,
+    `G`, `PA`, `Hits`, `HR`, `BB`, `BB%`, `K%`, `WHIP`, `FIP`
+  )
+
+career_pitcher_stats %>%
+  kbl(caption = paste("Pitching Results Summary –", params$pitcher, "- 2025")) %>%
+  kable_styling(full_width = FALSE)
+```
+
+```{r pitch-characteristics-table-2025}
+pitch_summary <- clean_data %>%
+  filter(Pitcher == params$pitcher,
+         year == "2025",
+         !is.na(RelSpeed), !is.na(HorzBreak), !is.na(InducedVertBreak),
+         !is.na(SpinRate), !is.na(TaggedPitchType)) %>%
+  group_by(TaggedPitchType) %>%
+  summarise(
+    avg_velo = round(mean(RelSpeed, na.rm = TRUE), 1),
+    avg_horz = round(mean(HorzBreak, na.rm = TRUE), 1),
+    avg_vert = round(mean(InducedVertBreak, na.rm = TRUE), 1),
+    avg_spin = round(mean(SpinRate, na.rm = TRUE), 0),
+    count = n(),
+    .groups = "drop"
+  ) %>%
+  mutate(usage_pct = round(count / sum(count) * 100, 1))
+
+pitch_grades <- pitching_plus %>%
+  filter(Pitcher == params$pitcher, year == "2025") %>%
+  select(TaggedPitchType, Stuff_plus, Command_plus) %>%
+  mutate(
+    Stuff_plus = round(Stuff_plus, 1),
+    Command_plus = round(Command_plus, 1)
+  )
+
+pitch_table <- pitch_summary %>%
+  left_join(pitch_grades, by = "TaggedPitchType") %>%
+  filter(!is.na(Stuff_plus), !is.na(Command_plus)) %>%
+  select(`Pitch Type` = TaggedPitchType,
+         `Velo (mph)` = avg_velo,
+         `Spin (rpm)` = avg_spin,
+         `Horz Break (in)` = avg_horz,
+         `Vert Break (in)` = avg_vert,
+         `Usage (%)` = usage_pct,
+         `Stuff+` = Stuff_plus,
+         `Command+` = Command_plus)
+
+pitch_table %>%
+  kbl(
+    caption = paste("Pitch Characteristics –", params$pitcher, "- 2025"),
+    digits = 1
+  ) %>%
+  kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover"))
+```
+
+```{r pitch-outcome-breakdown-2025}
+results_table_2025 <- filtered_data %>%
+  filter(!is.na(TaggedPitchType)) %>%
+  mutate(
+    is_swing = PitchCall %in% c("StrikeSwinging", "FoulBall", "InPlay"),
+    is_whiff = PitchCall == "StrikeSwinging",
+    is_in_play = PitchCall == "InPlay",
+    is_hard_hit = ExitSpeed >= 95,
+    is_gb = is_in_play & (Angle < 10),
+    is_chase = is_swing & (
+      PlateLocSide < -0.83 | PlateLocSide > 0.83 | 
+      PlateLocHeight < 1.5 | PlateLocHeight > 3.5
+    )
+  ) %>%
+  group_by(TaggedPitchType) %>%
+  summarise(
+    pitches = n(),
+    swings = sum(is_swing, na.rm = TRUE),
+    whiffs = sum(is_whiff, na.rm = TRUE),
+    in_play = sum(is_in_play, na.rm = TRUE),
+    hard_hit = sum(is_hard_hit, na.rm = TRUE),
+    ground_balls = sum(is_gb, na.rm = TRUE),
+    chases = sum(is_chase, na.rm = TRUE),
+    
+    whiff_pct = ifelse(swings > 0, round(100 * whiffs / swings, 1), NA_real_),
+    chase_pct = ifelse(swings > 0, round(100 * chases / swings, 1), NA_real_),
+    gb_pct = ifelse(in_play > 0, round(100 * ground_balls / in_play, 1), NA_real_),
+    in_play_pct = round(100 * in_play / pitches, 1),
+    hard_hit_pct = ifelse(in_play > 0, round(100 * hard_hit / in_play, 1), NA_real_),
+    avg_ev = round(mean(ExitSpeed[is_in_play], na.rm = TRUE), 1),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    whiff_pct = ifelse(is.na(whiff_pct), "—", whiff_pct),
+    chase_pct = ifelse(is.na(chase_pct), "—", chase_pct),
+    gb_pct = ifelse(is.na(gb_pct), "—", gb_pct),
+    in_play_pct = ifelse(is.na(in_play_pct), "—", in_play_pct),
+    hard_hit_pct = ifelse(is.na(hard_hit_pct), "—", hard_hit_pct),
+    avg_ev = ifelse(is.na(avg_ev), "—", avg_ev)
+  )
+
+results_table_2025 %>%
+  rename(
+    `Pitch Type` = TaggedPitchType,
+    `Pitches` = pitches,
+    `Swings` = swings,
+    `Whiffs` = whiffs,
+    `In-Play` = in_play,
+    `HH` = hard_hit,
+    `GB` = ground_balls,
+    `Chases` = chases,  
+    `Whiff %` = whiff_pct,
+    `Chase %` = chase_pct,
+    `In-Play %` = in_play_pct,
+    `HH %` = hard_hit_pct,
+    `GB %` = gb_pct,
+    `Avg EV` = avg_ev
+  ) %>%
+  knitr::kable(
+    caption = paste("Pitch Outcome Metrics –", params$pitcher, "- 2025"),
+    digits = 1
+  ) %>%
+  kableExtra::kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover"))
+```
+
+```{r behavior-summary-2025, results='asis'}
+behavior_table <- filtered_behavior_summary %>%
+  filter(year == "2025") %>%
+  transmute(
+    `First-Pitch Strike %` = round(FPS_percent * 100, 1),
+    `K% After Falling Behind` = round(K_Rate_Behind * 100, 1),
+    `BB% After Getting Ahead` = round(BB_Rate_Ahead * 100, 1),
+    `Short PAs (<5 pitches)` = round(Short_PA_Rate * 100, 1)
+  )
+
+if (nrow(behavior_table) > 0) {
+  behavior_table %>%
+    kbl(caption = paste("Count Behavior Summary –", params$pitcher, "-", "2025")) %>%
+    kable_styling(full_width = FALSE)
+} else {
+  cat("No count behavior data available for this pitcher.\n")
+}
+```
+
+```{r plot-movement-vs-league-2025, fig.width=10, fig.height=6}
+ggplot() +
+  geom_circle(aes(x0 = 0, y0 = 0, r = 12), color = "gray80", linetype = "dotted") +
+  geom_circle(aes(x0 = 0, y0 = 0, r = 24), color = "gray80", linetype = "dotted") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray60") +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray60") +
+  geom_point(data = league_movement, aes(x = avg_HorzBrk, y = avg_VertBrk, color = TaggedPitchType), size = 3, alpha = 0.3) +
+  geom_point(data = pitcher_mov, aes(x = avg_HorzBrk, y = avg_VertBrk, color = TaggedPitchType, size = usage_pct * 100), shape = 16) +
+  coord_fixed(xlim = c(-25, 25), ylim = c(-25, 25)) +
+  labs(title = paste("Pitch Movement vs League –", params$pitcher, "2025"),
+       x = "Horizontal Break (in)", y = "Vertical Break (in)", color = "Pitch Type") +
+  scale_size_continuous(name = "Usage %") +
+  theme_minimal()
+```
+
+```{r plots-2025, fig.width=10, fig.height=5}
+pitcher_mov <- filtered_data %>%
+  filter(!is.na(TaggedPitchType)) %>%
+  group_by(TaggedPitchType) %>%
+  summarise(pitch_count = n(), .groups = "drop") %>%
+  mutate(usage_pct = round(pitch_count / sum(pitch_count) * 100, 1))
+
+ggplot(pitcher_mov, aes(x = reorder(TaggedPitchType, -usage_pct), y = usage_pct, fill = TaggedPitchType)) +
+  geom_col(width = 0.6) +
+  geom_text(aes(label = paste0(usage_pct, "%")), vjust = -0.5) +
+  labs(title = paste("Pitch Usage –", season_label), x = NULL, y = "Usage %") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), plot.title = element_text(size = 16))
+```
+
+```{r heatmap-2025, fig.width=10, fig.height=6}
+heatmap_data <- filtered_data %>%
+  filter(!is.na(PlateLocSide), !is.na(PlateLocHeight), !is.na(TaggedPitchType))
+
+ggplot(heatmap_data, aes(x = PlateLocSide, y = PlateLocHeight)) +
+  geom_density_2d_filled(alpha = 0.8) +
+  geom_rect(aes(xmin = -0.95, xmax = 0.95, ymin = 1.5, ymax = 3.5),
+            fill = NA, color = "black", linetype = "dashed") +
+  facet_wrap(~ TaggedPitchType, ncol = 3) +
+  coord_fixed() +
+  theme_minimal() +
+  labs(title = paste("Pitch Location Heatmaps –", season_label), x = "PlateLocSide", y = "PlateLocHeight")
+```
+
+```{r command-map-2025, fig.width=10, fig.height=6}
+command_data <- filtered_data %>%
+  filter(!is.na(PlateLocSide), !is.na(PlateLocHeight), !is.na(TaggedPitchType), !is.na(PitcherThrows)) %>%
+  mutate(
+    is_LHP = PitcherThrows == "Left",
+    is_competitive = PlateLocSide >= -1.5 & PlateLocSide <= 1.5 & PlateLocHeight >= 1.2 & PlateLocHeight <= 4.0,
+    location_rating = case_when(
+      TaggedPitchType == "four-seam" & (PlateLocHeight >= 3.2 | abs(PlateLocSide) >= 0.7) & is_competitive ~ "ideal",
+      TaggedPitchType == "sinker" & (PlateLocHeight <= 2.2 | abs(PlateLocSide) >= 0.7) & is_competitive ~ "ideal",
+      TaggedPitchType == "slider" & PlateLocHeight <= 2 & ((PlateLocSide < 0 & !is_LHP) | (PlateLocSide > 0 & is_LHP)) & is_competitive ~ "ideal",
+      TaggedPitchType == "changeup" & PlateLocHeight <= 2 & is_competitive ~ "ideal",
+      TaggedPitchType == "curveball" & PlateLocHeight <= 2 & is_competitive ~ "ideal",
+      TaggedPitchType == "cutter" & PlateLocHeight >= 2.5 & abs(PlateLocSide) >= 0.6 & abs(PlateLocSide) <= 1.1 & is_competitive ~ "ideal",
+      PlateLocSide < -1.6 | PlateLocSide > 1.6 | PlateLocHeight < 1.0 | PlateLocHeight > 4.2 ~ "bad",
+      abs(PlateLocSide) <= 0.3 & PlateLocHeight >= 2.2 & PlateLocHeight <= 3.2 ~ "bad",
+      TRUE ~ "non-ideal"
+    )
+  )
+
+ggplot(command_data, aes(x = PlateLocSide, y = PlateLocHeight, fill = location_rating)) +
+  geom_point(alpha = 0.7, shape = 21, color = "black", size = 2) +
+  geom_rect(aes(xmin = -0.95, xmax = 0.95, ymin = 1.5, ymax = 3.5), fill = NA, color = "black", linetype = "dashed") +
+  facet_wrap(~ TaggedPitchType, ncol = 3) +
+  scale_fill_manual(values = c("ideal" = "darkgreen", "non-ideal" = "gold", "bad" = "red")) +
+  coord_fixed() +
+  theme_minimal() +
+  labs(title = paste("Command Evaluation –", season_label), x = "Plate Location X", y = "Plate Location Y")
+```
+
+### 2024
+
+```{r render-2024, results='asis'}
+if (has_data_2024) {
+  filtered_data <- filtered_data_2024
+  season_label <- "2024"
+
+  # INSERT ALL your 2024 blocks here
+
+} else {
+  cat("")  # do nothing
+}
+```
+
+```{r movement-vs-league-2024}
+pitcher_mov <- filtered_data %>%
+  filter(!is.na(TaggedPitchType), !is.na(HorzBreak), !is.na(InducedVertBreak)) %>%
+  group_by(TaggedPitchType) %>%
+  summarise(
+    avg_HorzBrk = mean(HorzBreak, na.rm = TRUE),
+    avg_VertBrk = mean(InducedVertBreak, na.rm = TRUE),
+    pitch_count = n(),
+    .groups = "drop"
+  ) %>%
+  mutate(usage_pct = pitch_count / sum(pitch_count))
+
+pitcher_hand <- unique(filtered_data$PitcherThrows)
+pitcher_pitch_types <- pitcher_mov$TaggedPitchType
+
+league_movement <- clean_data %>%
+  filter(
+    !is.na(TaggedPitchType), !is.na(HorzBreak), !is.na(InducedVertBreak),
+    PitcherThrows == pitcher_hand,
+    TaggedPitchType %in% pitcher_pitch_types
+  ) %>%
+  group_by(TaggedPitchType) %>%
+  summarise(
+    avg_HorzBrk = mean(HorzBreak, na.rm = TRUE),
+    avg_VertBrk = mean(InducedVertBreak, na.rm = TRUE),
+    .groups = "drop"
+  )
+```
+
+```{r summary-2024}
+if (has_data_2024) {
+  pitcher_info <- pitching_ultra %>%
+    mutate(year = as.character(year)) %>%
+    filter(Pitcher == params$pitcher, year == "2024") %>%
+    left_join(
+      clean_data %>%
+        mutate(year = as.character(year)) %>%
+        select(Pitcher, year, PitcherTeam),
+      by = c("Pitcher", "year")
+    ) %>%
+    left_join(
+      select(conference_data, Trackman, `Ncaa Name`),
+      by = c("PitcherTeam" = "Trackman")
+    ) %>%
+    distinct()
+
+  summary_table <- pitcher_info %>%
+    select(
+      `School` = `Ncaa Name`,
+      `Stuff +` = avg_StuffPlus,
+      `Command +` = avg_CommandPlus,
+      `Pitching +` = Pitching_plus,
+      `xPitching +` = XPitching_plus,
+      `Pitching Ultra` = Pitching_Ultra
+    )
+
+  summary_table %>%
+    kbl(caption = paste("Performance Summary –", params$pitcher, "- 2024"), digits = 1) %>%
+    kable_styling(full_width = FALSE)
+} else {
+  cat("No 2024 summary data available for this pitcher.\n")
+}
+```
+
+```{r pitcher-results-2024}
+career_pitcher_stats <- pitcher_results %>%
+  filter(Pitcher == params$pitcher, year == "2024") %>%
+  group_by(Pitcher) %>%
+  summarise(
+    G = sum(G, na.rm = TRUE),
+    PA = sum(PA, na.rm = TRUE),
+    BB = sum(BB, na.rm = TRUE),
+    K = sum(K, na.rm = TRUE),
+    HBP = sum(HBP, na.rm = TRUE),
+    Hits = sum(Hits, na.rm = TRUE),
+    HR = sum(HR, na.rm = TRUE),
+    Outs = sum(Outs, na.rm = TRUE),
+    IP_display = paste0(floor(Outs / 3), ".", Outs %% 3),
+    IP_numeric = Outs / 3,
+    WHIP = round((BB + HBP + Hits) / (Outs / 3), 2),
+    `BB%` = round(100 * BB / PA, 1),
+    `K%` = round(100 * K / PA, 1),
+    FIP = round(((13 * HR + 3 * (BB + HBP) - 2 * K) / (Outs / 3)) + 3.1, 2),
+    .groups = "drop"
+  ) %>%
+  select(`IP` = IP_display,
+    `G`, `PA`, `Hits`, `HR`, `BB`, `BB%`, `K%`, `WHIP`, `FIP`
+  )
+
+career_pitcher_stats %>%
+  kbl(caption = paste("Pitching Results Summary –", params$pitcher, "- 2024")) %>%
+  kable_styling(full_width = FALSE)
+```
+
+```{r pitch-characteristics-table-2024}
+pitch_summary <- clean_data %>%
+  filter(Pitcher == params$pitcher,
+         year == "2024",
+         !is.na(RelSpeed), !is.na(HorzBreak), !is.na(InducedVertBreak),
+         !is.na(SpinRate), !is.na(TaggedPitchType)) %>%
+  group_by(TaggedPitchType) %>%
+  summarise(
+    avg_velo = round(mean(RelSpeed, na.rm = TRUE), 1),
+    avg_horz = round(mean(HorzBreak, na.rm = TRUE), 1),
+    avg_vert = round(mean(InducedVertBreak, na.rm = TRUE), 1),
+    avg_spin = round(mean(SpinRate, na.rm = TRUE), 0),
+    count = n(),
+    .groups = "drop"
+  ) %>%
+  mutate(usage_pct = round(count / sum(count) * 100, 1))
+
+pitch_grades <- pitching_plus %>%
+  filter(Pitcher == params$pitcher, year == "2024") %>%
+  select(TaggedPitchType, Stuff_plus, Command_plus) %>%
+  mutate(
+    Stuff_plus = round(Stuff_plus, 1),
+    Command_plus = round(Command_plus, 1)
+  )
+
+pitch_table <- pitch_summary %>%
+  left_join(pitch_grades, by = "TaggedPitchType") %>%
+  filter(!is.na(Stuff_plus), !is.na(Command_plus)) %>%
+  select(`Pitch Type` = TaggedPitchType,
+         `Velo (mph)` = avg_velo,
+         `Spin (rpm)` = avg_spin,
+         `Horz Break (in)` = avg_horz,
+         `Vert Break (in)` = avg_vert,
+         `Usage (%)` = usage_pct,
+         `Stuff+` = Stuff_plus,
+         `Command+` = Command_plus)
+
+pitch_table %>%
+  kbl(
+    caption = paste("Pitch Characteristics –", params$pitcher, "- 2024"),
+    digits = 1
+  ) %>%
+  kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover"))
+```
+
+```{r pitch-outcome-breakdown-2024}
+results_table_2024 <- filtered_data %>%
+  filter(!is.na(TaggedPitchType)) %>%
+  mutate(
+    is_swing = PitchCall %in% c("StrikeSwinging", "FoulBall", "InPlay"),
+    is_whiff = PitchCall == "StrikeSwinging",
+    is_in_play = PitchCall == "InPlay",
+    is_hard_hit = ExitSpeed >= 95,
+    is_gb = is_in_play & (Angle < 10),
+    is_chase = is_swing & (
+      PlateLocSide < -0.83 | PlateLocSide > 0.83 | 
+      PlateLocHeight < 1.5 | PlateLocHeight > 3.5
+    )
+  ) %>%
+  group_by(TaggedPitchType) %>%
+  summarise(
+    pitches = n(),
+    swings = sum(is_swing, na.rm = TRUE),
+    whiffs = sum(is_whiff, na.rm = TRUE),
+    in_play = sum(is_in_play, na.rm = TRUE),
+    hard_hit = sum(is_hard_hit, na.rm = TRUE),
+    ground_balls = sum(is_gb, na.rm = TRUE),
+    chases = sum(is_chase, na.rm = TRUE),
+    
+    whiff_pct = ifelse(swings > 0, round(100 * whiffs / swings, 1), NA_real_),
+    chase_pct = ifelse(swings > 0, round(100 * chases / swings, 1), NA_real_),
+    gb_pct = ifelse(in_play > 0, round(100 * ground_balls / in_play, 1), NA_real_),
+    in_play_pct = round(100 * in_play / pitches, 1),
+    hard_hit_pct = ifelse(in_play > 0, round(100 * hard_hit / in_play, 1), NA_real_),
+    avg_ev = round(mean(ExitSpeed[is_in_play], na.rm = TRUE), 1),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    whiff_pct = ifelse(is.na(whiff_pct), "—", whiff_pct),
+    chase_pct = ifelse(is.na(chase_pct), "—", chase_pct),
+    gb_pct = ifelse(is.na(gb_pct), "—", gb_pct),
+    in_play_pct = ifelse(is.na(in_play_pct), "—", in_play_pct),
+    hard_hit_pct = ifelse(is.na(hard_hit_pct), "—", hard_hit_pct),
+    avg_ev = ifelse(is.na(avg_ev), "—", avg_ev)
+  )
+
+results_table_2024 %>%
+  rename(
+    `Pitch Type` = TaggedPitchType,
+    `Pitches` = pitches,
+    `Swings` = swings,
+    `Whiffs` = whiffs,
+    `In-Play` = in_play,
+    `HH` = hard_hit,
+    `GB` = ground_balls,
+    `Chases` = chases,  
+    `Whiff %` = whiff_pct,
+    `Chase %` = chase_pct,
+    `In-Play %` = in_play_pct,
+    `HH %` = hard_hit_pct,
+    `GB %` = gb_pct,
+    `Avg EV` = avg_ev
+  ) %>%
+  knitr::kable(
+    caption = paste("Pitch Outcome Metrics –", params$pitcher, "- 2024"),
+    digits = 1
+  ) %>%
+  kableExtra::kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover"))
+```
+
+```{r behavior-summary-2024, results='asis'}
+behavior_table <- filtered_behavior_summary %>%
+  filter(year == "2024") %>%
+  transmute(
+    `First-Pitch Strike %` = round(FPS_percent * 100, 1),
+    `K% After Falling Behind` = round(K_Rate_Behind * 100, 1),
+    `BB% After Getting Ahead` = round(BB_Rate_Ahead * 100, 1),
+    `Short PAs (<5 pitches)` = round(Short_PA_Rate * 100, 1)
+  )
+
+if (nrow(behavior_table) > 0) {
+  behavior_table %>%
+    kbl(caption = paste("Count Behavior Summary –", params$pitcher, "-", "2024")) %>%
+    kable_styling(full_width = FALSE)
+} else {
+  cat("No count behavior data available for this pitcher.\n")
+}
+```
+
+```{r plot-movement-vs-league-2024, fig.width=10, fig.height=6}
+ggplot() +
+  geom_circle(aes(x0 = 0, y0 = 0, r = 12), color = "gray80", linetype = "dotted") +
+  geom_circle(aes(x0 = 0, y0 = 0, r = 24), color = "gray80", linetype = "dotted") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray60") +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray60") +
+  geom_point(data = league_movement, aes(x = avg_HorzBrk, y = avg_VertBrk, color = TaggedPitchType), size = 3, alpha = 0.3) +
+  geom_point(data = pitcher_mov, aes(x = avg_HorzBrk, y = avg_VertBrk, color = TaggedPitchType, size = usage_pct * 100), shape = 16) +
+  coord_fixed(xlim = c(-25, 25), ylim = c(-25, 25)) +
+  labs(title = paste("Pitch Movement vs League –", params$pitcher, "2024"),
+       x = "Horizontal Break (in)", y = "Vertical Break (in)", color = "Pitch Type") +
+  scale_size_continuous(name = "Usage %") +
+  theme_minimal()
+```
+
+```{r heatmap-2024, fig.width=10, fig.height=6}
+heatmap_data <- filtered_data %>%
+  filter(!is.na(PlateLocSide), !is.na(PlateLocHeight), !is.na(TaggedPitchType))
+
+ggplot(heatmap_data, aes(x = PlateLocSide, y = PlateLocHeight)) +
+  geom_density_2d_filled(alpha = 0.8) +
+  geom_rect(aes(xmin = -0.95, xmax = 0.95, ymin = 1.5, ymax = 3.5),
+            fill = NA, color = "black", linetype = "dashed") +
+  facet_wrap(~ TaggedPitchType, ncol = 3) +
+  coord_fixed() +
+  theme_minimal() +
+  labs(title = paste("Pitch Location Heatmaps –", season_label), x = "PlateLocSide", y = "PlateLocHeight")
+```
+
+```{r command-map-2024, fig.width=10, fig.height=6}
+command_data <- filtered_data %>%
+  filter(!is.na(PlateLocSide), !is.na(PlateLocHeight), !is.na(TaggedPitchType), !is.na(PitcherThrows)) %>%
+  mutate(
+    is_LHP = PitcherThrows == "Left",
+    is_competitive = PlateLocSide >= -1.5 & PlateLocSide <= 1.5 & PlateLocHeight >= 1.2 & PlateLocHeight <= 4.0,
+    location_rating = case_when(
+      TaggedPitchType == "four-seam" & (PlateLocHeight >= 3.2 | abs(PlateLocSide) >= 0.7) & is_competitive ~ "ideal",
+      TaggedPitchType == "sinker" & (PlateLocHeight <= 2.2 | abs(PlateLocSide) >= 0.7) & is_competitive ~ "ideal",
+      TaggedPitchType == "slider" & PlateLocHeight <= 2 & ((PlateLocSide < 0 & !is_LHP) | (PlateLocSide > 0 & is_LHP)) & is_competitive ~ "ideal",
+      TaggedPitchType == "changeup" & PlateLocHeight <= 2 & is_competitive ~ "ideal",
+      TaggedPitchType == "curveball" & PlateLocHeight <= 2 & is_competitive ~ "ideal",
+      TaggedPitchType == "cutter" & PlateLocHeight >= 2.5 & abs(PlateLocSide) >= 0.6 & abs(PlateLocSide) <= 1.1 & is_competitive ~ "ideal",
+      PlateLocSide < -1.6 | PlateLocSide > 1.6 | PlateLocHeight < 1.0 | PlateLocHeight > 4.2 ~ "bad",
+      abs(PlateLocSide) <= 0.3 & PlateLocHeight >= 2.2 & PlateLocHeight <= 3.2 ~ "bad",
+      TRUE ~ "non-ideal"
+    )
+  )
+
+ggplot(command_data, aes(x = PlateLocSide, y = PlateLocHeight, fill = location_rating)) +
+  geom_point(alpha = 0.7, shape = 21, color = "black", size = 2) +
+  geom_rect(aes(xmin = -0.95, xmax = 0.95, ymin = 1.5, ymax = 3.5), fill = NA, color = "black", linetype = "dashed") +
+  facet_wrap(~ TaggedPitchType, ncol = 3) +
+  scale_fill_manual(values = c("ideal" = "darkgreen", "non-ideal" = "gold", "bad" = "red")) +
+  coord_fixed() +
+  theme_minimal() +
+  labs(title = paste("Command Evaluation –", season_label), x = "Plate Location X", y = "Plate Location Y")
+```
