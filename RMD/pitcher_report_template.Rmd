@@ -9,7 +9,6 @@ output:
     css: style.css
 params:
   pitcher: ""
-  extra_note: ""
 ---
 
 ```{r setup, include=FALSE}
@@ -35,9 +34,9 @@ library(patchwork)
   border-radius: 6px;                
 ">
   <strong>Pitcher Notes</strong>
+Liam Doyle is a left-handed pitcher from the University of Tennessee who dominated in 2025, posting a 3.20 ERA with 164 strikeouts over 95.2 innings. He has spent each of his three NCAA seasons at different programs—starting at Coastal Carolina, then Mississippi, and finally Tennessee—while compiling an impressive 13.8 K/9 over his college career. Doyle made a significant leap forward in 2025 and is projected to be a top pick in the MLB Draft.
 
-  Right-handed pitcher with an east-to-west profile built around a sinker/slider/curveball mix. His primary pitch is a <strong>sinker</strong> (89.8 MPH, 54.2% usage)  
-  ... In 2025, he posted a <strong>25.9% K%</strong> and <strong>10.2% BB%</strong>, with a <strong>3.70 FIP</strong>.
+His fastball is his premier weapon, touching 100 mph with strong life, making it especially effective at the top of the zone. His slider, his second-most used pitch, has taken a step forward in 2025, now featuring sharp glove-side break with some late drop, giving him a reliable secondary option. Early in the 2025 season, his Splitter  has also shown promise—offering heavy drop, a substantial velocity gap from his fastball, and low spin rates. It has the potential to become a quality offering against right-handed hitters at the professional level.
 </div>
 
 ## Stats by Year {.tabset}

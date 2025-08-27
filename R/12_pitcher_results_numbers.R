@@ -1,6 +1,5 @@
 pitcher_results <- pa_data_pitcher %>%
   mutate(
-    # Flag outcomes
     Single = as.integer(PlayResult_clean == "Single"),
     Double = as.integer(PlayResult_clean == "Double"),
     Triple = as.integer(PlayResult_clean == "Triple"),
@@ -11,7 +10,10 @@ pitcher_results <- pa_data_pitcher %>%
     K = as.integer(KorBB %in% c("Strikeout", "StrikeOut")),
     Outs_minus_k = as.integer(PlayResult_clean == "Out"),
     IP_numeric = (Outs_minus_k + K) / 3,
-    PA = 1
+    PA = 1,
+    BattedBall = !is.na(ExitSpeed),
+    SoftHit    = as.integer(BattedBall & ExitSpeed < 80),   
+    HardHit    = as.integer(BattedBall & ExitSpeed >= 95)   
   ) %>%
   group_by(Pitcher, year) %>%
   summarise(
@@ -29,8 +31,11 @@ pitcher_results <- pa_data_pitcher %>%
     WHIP = ifelse(IP_numeric > 0, round((BB + HBP + Hits) / IP_numeric, 2), NA_real_),
     BB_percent = round(100 * BB / PA, 1),
     K_percent = round(100 * K / PA, 1),
-    
+    batted_balls = sum(BattedBall, na.rm = TRUE),
+    soft_hits    = sum(SoftHit, na.rm = TRUE),
+    hard_hits    = sum(HardHit, na.rm = TRUE),
+    soft_hit_pct = ifelse(batted_balls > 0, round(100 * soft_hits / batted_balls, 1), NA_real_),
+    hard_hit_pct = ifelse(batted_balls > 0, round(100 * hard_hits / batted_balls, 1), NA_real_),
     FIP = ifelse(IP_numeric > 0, round(((13 * HR + 3 * (BB + HBP) - 2 * K) / IP_numeric) + 3.1, 2), NA_real_),
-    
     .groups = "drop"
   )

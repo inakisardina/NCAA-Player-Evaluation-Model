@@ -1,15 +1,32 @@
-hugus <- pitching_ultra %>% filter(Pitcher == "Hugus, Griffin")
-doyle <- count_behavior_summary_by_year %>% filter(Pitcher == "Doyle, Liam")
-anderson <- most_used_pitch_by_count %>% filter(Pitcher == "Anderson, Kade")
-arnold <- most_used_pitch_by_count %>% filter(Pitcher == "Arnold, Jamie")
+# ----- Working Directory -----
+stewd("/Users/kaks/Desktop/CanesBaseball/PitchingUltra")
+
+
+
+# ----- Clean Duplicates -----
+# Clean Repeated Names
+clean_data <- clean_data %>%
+  mutate(
+    Pitcher = ifelse(
+      Pitcher == "Weber, Ben" & PitcherTeam == "UNO_MAV",
+      "Fink, Carter (UNO)",
+      Pitcher
+    )
+  )
+
+# ===== Test Data Sets =====
+hugus <- xpitching_test_joined_data %>% filter(Pitcher == "Hugus, Griffin")
+doyle <- test_joined_data %>% filter(Pitcher == "Doyle, Liam")
+anderson <- xpitching_plus %>% filter(Pitcher == "Anderson, Kade")
+arnold <- pitcher_stuff %>% filter(Pitcher == "Arnold, Jamie")
 with <- most_used_pitch_by_count %>% filter(Pitcher == "Witherspoon, Kyson")
 bremner <- most_used_pitch_by_count %>% filter(Pitcher == "Bremner, Tyler")
 wood <- most_used_pitch_by_count %>% filter(Pitcher == "Wood, Gage")
 forbes <- most_used_pitch_by_count %>%  filter(Pitcher == "Forbes, Patrick")
 quick <- most_used_pitch_by_count %>%  filter(Pitcher == "Quick, Riley")
-eyanson <- most_used_pitch_by_count %>% filter(Pitcher == "Eyanson, Anthony")
-
-
+eyanson <- pitching_ultra %>% filter(Pitcher == "Eyanson, Anthony")
+cardenas <- pitcher_stuff %>% filter(Pitcher == "Cardenas III, Xavier")
+# ===== Other Stuff =====
 pitcher_name <- "Doyle, Liam"
 
 viz_data <- clean_data %>%
@@ -219,3 +236,107 @@ ggplot(doyle, aes(x = FPS_percent, y = K_Rate_Behind)) +
     y = "K After Falling Behind"
   ) +
   theme_minimal()
+
+
+test_league_stats <- clean_data %>%
+  filter(!is.na(TaggedPitchType), !is.na(HorzBreak), !is.na(InducedVertBreak), !is.na(RelSpeed)) %>%
+  mutate(year = as.character(year)) %>%
+  group_by(TaggedPitchType, Hand, year) %>%
+  summarise(
+    league_Vel = mean(RelSpeed, na.rm = TRUE),
+    league_HorzBrk = mean(HorzBreak, na.rm = TRUE),
+    league_VertBrk = mean(InducedVertBreak, na.rm = TRUE),
+    league_SpinRate = mean(SpinRate, na.rm = TRUE),
+    sd_HorzBrk = sd(HorzBreak, na.rm = TRUE),
+    sd_VertBrk = sd(InducedVertBreak, na.rm = TRUE),
+    sd_SpinRate = sd(SpinRate, na.rm = TRUE),
+    avg_exit_velo = mean(ExitSpeed, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# ===== Test Correlations =====
+
+test_pitching_ultra_clean <- pitching_ultra %>%
+  filter(year != "Overall") %>%
+  mutate(year = as.integer(as.character(year)))
+
+# Join on Pitcher + year
+test_joined_data <- test_pitching_ultra_clean %>%
+  left_join(pitcher_results, by = c("Pitcher", "year")) %>% 
+  filter(Outs > 50)
+
+test_joined_data <- test_joined_data %>%  
+  mutate(hr_perip = HR / IP_numeric,
+         xstatsdif = actual_bcw - expected_bcw)
+
+
+yxtyc <- test_joined_data %>% select(!expected_bcw,
+                                     !Pitching_plus_percentile,
+                                     !Pitching_Ultra_percentile,
+                                     !XPitching_plus_percentile,
+                                     !Command_plus_percentile,
+                                     !Stuff_plus_percentile,
+                                     !Outs_minus_k,
+                                     !IP_display)
+
+cor_result <- cor.test(
+  test_joined_data$xstatsdif,
+  test_joined_data$FIP,
+  use = "complete.obs",
+  method = "spearman"  
+)
+
+cor_result
+
+
+library(patchwork)
+p1 <- ggplot(test_joined_data, aes(x = avg_CommandPlus, y = BB_percent)) +
+  geom_point(alpha = 0.6, color = "black") +
+  geom_smooth(method = "lm", se = TRUE, color = "orange") +
+  labs(
+    title = "Relationship Between Command+ and BB%",
+    subtitle = "ρ = -0.27 (Min 50 Outs)",
+    x = "Command+",
+    y = "Walk Percentage"
+  ) +
+  theme_minimal()
+
+p2 <- ggplot(test_joined_data, aes(x = avg_CommandPlus, y = K_percent)) +
+  geom_point(alpha = 0.6, color = "black") +
+  geom_smooth(method = "lm", se = TRUE, color = "orange") +
+  labs(
+    title = "Relationship Between Command+ and K%",
+    subtitle = "ρ = 0.11 (Min 50 Outs)",
+    x = "Command+",
+    y = "Strikeout Percentage"
+  ) +
+  theme_minimal() 
+
+p3 <- ggplot(test_joined_data, aes(x = avg_CommandPlus, y = soft_hit_pct)) +
+  geom_point(alpha = 0.6, color = "black") +
+  geom_smooth(method = "lm", se = TRUE, color = "orange") +
+  labs(
+    title = "Relationship Between Command+ and Soft Hit %",
+    subtitle = "ρ = 0.11 (Min 50 Outs)",
+    x = "Command+",
+    y = "SoftHit %"
+  ) +
+  theme_minimal() 
+p4 <- ggplot(test_joined_data, aes(x = avg_StuffPlus, y = K_percent)) +
+  geom_point(alpha = 0.6, color = "black") +
+  geom_smooth(method = "lm", se = TRUE, color = "orange") +
+  labs(
+    title = "Relationship Between Stuff+ and K%",
+    subtitle = "ρ = 0.23 (Min 50 Outs)",
+    x = "Average Stuff+",
+    y = "SoftHit %"
+  ) +
+  theme_minimal() 
+
+(p1 + p3) / (p2 + p4)
+
+(p1) / (p2)
+
+p1 / (p2 + p3)
+
+p1 / p2 / p3

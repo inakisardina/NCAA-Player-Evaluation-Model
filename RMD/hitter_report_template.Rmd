@@ -12,7 +12,7 @@ params:
   extra_note: ""
 ---
 **Hitter Notes**
-LHH RF from San Diego. Left-handed bat with a balanced mix of power and discipline. Slashed .292/.398/.506 over 205 PA with 10 HR, 50 RBI, and a .392 wOBA. Has a patient approach (7.8% BB%) with some swing-and-miss (19.0% K%).
+Right-handed hitting third baseman from the University of Miami. As a freshman, slashed .351/.429/.736 with 24 HR and 75 RBI, earning Freshman All-American honors. In his sophomore campaign, he has continued to produce hard contact, handling all pitch types and driving the ball to all fields.
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(

@@ -1,20 +1,19 @@
 library(rmarkdown)
 library(dplyr)
 
-# Ensure output directory exists
 output_dir <- "output/reports"
 if (!dir.exists(output_dir)) {
   dir.create(output_dir, recursive = TRUE)
 }
 
-# Get top pitchers from the leaderboard (Script 07 output)
+# Top pitchers from the leaderboard 
 matched_pitchers <- pitching_ultra %>%
   filter(total_pitches >= 100) %>%
   arrange(desc(Pitching_Ultra)) %>%
   slice_head(n = 15) %>%  # Adjust number of reports here
   pull(Pitcher)
 
-# Loop and render an individual HTML for each pitcher
+
 for (p in matched_pitchers) {
   file_safe_name <- gsub(", ", "_", p)
   

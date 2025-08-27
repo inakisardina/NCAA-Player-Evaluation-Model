@@ -33,7 +33,7 @@ clean_pitch_type <- function(pitch) {
     str_replace_all("other|undefined", NA_character_)
 }
 
-# Filter for 2024 season, clean pitch type, and assign hand
+# Clean Pitch Type and Hand
 clean_data <- raw_data %>%
   mutate(
     TaggedPitchType = clean_pitch_type(AutoPitchType),
@@ -83,3 +83,23 @@ clean_data <- clean_data %>%
       TRUE ~ NA_character_
     )
   )
+
+# --- Ensure numeric `year` for downstream scripts ---
+# Try common fields; only uses what's present, no extra packages needed
+if ("year" %in% names(clean_data)) {
+  clean_data <- clean_data %>% mutate(year = as.integer(year))
+} else if ("Year" %in% names(clean_data)) {
+  clean_data <- clean_data %>% mutate(year = as.integer(Year))
+} else if ("Season" %in% names(clean_data)) {
+  clean_data <- clean_data %>% mutate(year = as.integer(Season))
+} else if ("GameDate" %in% names(clean_data)) {
+  # Expect formats like "2024-03-15" or "20240315" or "2024/03/15"
+  clean_data <- clean_data %>% mutate(year = as.integer(substr(as.character(GameDate), 1, 4)))
+} else if ("Date" %in% names(clean_data)) {
+  clean_data <- clean_data %>% mutate(year = as.integer(substr(as.character(Date), 1, 4)))
+} else {
+  stop("No source column found to derive numeric `year`.")
+}
+
+# Quick assert to catch surprises
+stopifnot(is.integer(clean_data$year) || is.numeric(clean_data$year))

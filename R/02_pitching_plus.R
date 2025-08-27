@@ -1,4 +1,4 @@
-# Step 1: Summarize pitcher "stuff" metrics with year
+# 1. Summarize pitcher "stuff" metrics with year
 pitcher_stuff <- clean_data %>%
   filter(!is.na(TaggedPitchType), !is.na(HorzBreak), !is.na(InducedVertBreak), !is.na(RelSpeed), !is.na(SpinRate)) %>%
   mutate(year = as.character(year)) %>%
@@ -12,7 +12,7 @@ pitcher_stuff <- clean_data %>%
     .groups = "drop"
   )
 
-# Step 2: League averages by year
+# 2. League averages by year
 league_stats <- clean_data %>%
   filter(!is.na(TaggedPitchType), !is.na(HorzBreak), !is.na(InducedVertBreak), !is.na(RelSpeed)) %>%
   mutate(year = as.character(year)) %>%
@@ -28,14 +28,14 @@ league_stats <- clean_data %>%
     .groups = "drop"
   )
 
-# Step 3: Average exit velocity
+# 3. Average exit velocity
 exit_velocity <- clean_data %>%
   filter(!is.na(ExitSpeed), !is.na(TaggedPitchType)) %>%
   mutate(year = as.character(year)) %>%
   group_by(Pitcher, TaggedPitchType, year) %>%
   summarise(avg_ev = mean(ExitSpeed, na.rm = TRUE), .groups = "drop")
 
-# Step 3.5: Command+ calculation
+# 3.5 Command+ calculation
 command_tagged <- clean_data %>%
   filter(!is.na(PlateLocSide), !is.na(PlateLocHeight), !is.na(TaggedPitchType), !is.na(PitcherThrows)) %>%
   mutate(
@@ -111,41 +111,51 @@ pitcher_command <- pitcher_command %>%
     Command_plus = round(((loc_plus * 0.5 + strike_plus * 0.3) * (1 - penalty_factor * penalty)) * 100, 1)
   )
 
-# Step 4: Stuff+ calculation
-evaluate_slider_stuff <- function(Velo_z, HB_z, IVB_z, Spin_z, avg_HorzBrk, avg_VertBrk) {
-  is_sweeper <- avg_HorzBrk < -10 & avg_VertBrk < 10
-  sweeper_val <- (0.89 * HB_z + 0.05 * Velo_z - 0.05 * IVB_z + 0.01 * Spin_z) * 100 + 100
-  gyro_val <- (0.3 * Velo_z - 0.3 * IVB_z + 0.3 * Spin_z + 0.1 * HB_z) * 100 + 100
+# 4. Stuff+ calculation
+# Helper: normalize HB by side of the pitcher
+normalize_hb <- function(hand, hb, side = c("arm", "glove")) {
+  side <- match.arg(side)
+  if (side == "arm") {
+    # Arm-side positive for both hands
+    ifelse(hand == "RHP", hb, -hb)
+  } else {
+    # Glove-side positive for both hands
+    ifelse(hand == "RHP", -hb, hb)
+  }
+}
+
+evaluate_slider_stuff <- function(Velo_z, HB_gs_z, IVB_z, Spin_z, HB_gs_raw, VertBrk_raw) {
+  is_sweeper <- (HB_gs_raw > 10) & (VertBrk_raw < 10)
+  sweeper_val <- (0.89 * HB_gs_z + 0.05 * Velo_z - 0.05 * IVB_z + 0.01 * Spin_z) * 100 + 100
+  gyro_val    <- (0.30 * Velo_z - 0.30 * IVB_z + 0.30 * Spin_z + 0.10 * HB_gs_z) * 100 + 100
   ifelse(is_sweeper, sweeper_val, gyro_val)
 }
 
 pitching_plus <- pitcher_stuff %>%
   left_join(league_stats, by = c("TaggedPitchType", "Hand", "year")) %>%
   mutate(
-    HB_gs = case_when(
-      Hand == "RHP" & TaggedPitchType %in% c("slider", "cutter") ~ -avg_HorzBrk,
-      Hand == "LHP" & TaggedPitchType %in% c("slider", "cutter") ~  avg_HorzBrk,
-      TRUE ~ avg_HorzBrk
-    ),
-    league_HB_gs = case_when(
-      Hand == "RHP" & TaggedPitchType %in% c("slider", "cutter") ~ -league_HorzBrk,
-      Hand == "LHP" & TaggedPitchType %in% c("slider", "cutter") ~  league_HorzBrk,
-      TRUE ~ league_HorzBrk
-    ),
+    HB_as        = normalize_hb(Hand, avg_HorzBrk, side = "arm"),
+    HB_gs        = normalize_hb(Hand, avg_HorzBrk, side = "glove"),
+    league_HB_as = normalize_hb(Hand, league_HorzBrk, side = "arm"),
+    league_HB_gs = normalize_hb(Hand, league_HorzBrk, side = "glove"),
     Velo_z = (avg_Vel - league_Vel) / league_Vel,
-    HB_z = (HB_gs - league_HB_gs) / sd_HorzBrk,
-    IVB_z = (avg_VertBrk - league_VertBrk) / sd_VertBrk,
-    Spin_z = (avg_SpinRate - league_SpinRate) / sd_SpinRate
+    HB_as_z = (HB_as - league_HB_as) / sd_HorzBrk,
+    HB_gs_z = (HB_gs - league_HB_gs) / sd_HorzBrk,
+    IVB_z   = (avg_VertBrk - league_VertBrk) / sd_VertBrk,
+    Spin_z  = (avg_SpinRate - league_SpinRate) / sd_SpinRate
   ) %>%
   rowwise() %>%
   mutate(
     Stuff_plus = case_when(
       TaggedPitchType == "four-seam" ~ (0.5 * Velo_z + 0.4 * IVB_z + 0.1 * Spin_z) * 100 + 100,
-      TaggedPitchType == "sinker"    ~ (0.4 * Velo_z + 0.4 * HB_z - 0.3 * IVB_z - 0.1 * Spin_z) * 100 + 100,
-      TaggedPitchType == "slider"    ~ evaluate_slider_stuff(Velo_z, HB_z, IVB_z, Spin_z, avg_HorzBrk, avg_VertBrk),
-      TaggedPitchType == "curveball" ~ (0.3 * Velo_z - 0.6 * IVB_z + 0.1 * Spin_z) * 100 + 100,
-      TaggedPitchType == "cutter"    ~ (0.4 * Velo_z + 0.3 * IVB_z + 0.2 * HB_z + 0.1 * Spin_z) * 100 + 100,
-      TaggedPitchType == "changeup"  ~ (0.4 * Velo_z + 0.3 * HB_z - 0.2 * IVB_z - 0.1 * Spin_z) * 100 + 100,
+      TaggedPitchType == "sinker"    ~ (0.4 * Velo_z + 0.4 * HB_as_z - 0.3 * IVB_z - 0.1 * Spin_z) * 100 + 100,
+      TaggedPitchType == "slider"    ~ evaluate_slider_stuff(
+        Velo_z, HB_gs_z, IVB_z, Spin_z,
+        HB_gs_raw = HB_gs, VertBrk_raw = avg_VertBrk
+      ),
+      TaggedPitchType == "curveball" ~ (0.3 * Velo_z - 0.6 * IVB_z + 0.1 * Spin_z + 0.0 * HB_gs_z) * 100 + 100,
+      TaggedPitchType == "cutter"    ~ (0.4 * Velo_z + 0.3 * IVB_z + 0.2 * HB_gs_z + 0.1 * Spin_z) * 100 + 100,
+      TaggedPitchType == "changeup"  ~ (0.4 * Velo_z + 0.3 * HB_as_z - 0.2 * IVB_z - 0.1 * Spin_z) * 100 + 100,
       TRUE ~ NA_real_
     ),
     Stuff_plus = round(Stuff_plus, 1)
@@ -155,11 +165,11 @@ pitching_plus <- pitcher_stuff %>%
             by = c("Pitcher", "TaggedPitchType", "year")) %>%
   left_join(exit_velocity, by = c("Pitcher", "TaggedPitchType", "year"))
 
-# Step 5: Final metric calculation
+# 5. Final metric calculation
 pitching_plus <- pitching_plus %>%
   mutate(
     Contact_plus = round((1 - avg_ev / 85) * 100 + 100, 1),
-    Raw_Pitching_plus = round((Stuff_plus * 0.5 + Command_plus * 0.3 + Contact_plus * 0.2), 1)
+    Raw_Pitching_plus = round((Stuff_plus * 0.4 + Command_plus * 0.3 + Contact_plus * 0.3), 1)
   )
 
 league_avg_pitching <- mean(pitching_plus$Raw_Pitching_plus, na.rm = TRUE)
@@ -170,7 +180,7 @@ pitching_plus <- pitching_plus %>%
     PerPitch_Pitching_plus = round((Raw_Pitching_plus * weight + league_avg_pitching * (1 - weight)), 1)
   )
 
-# Step 6: Pitcher-year summary
+# 6. Pitcher-year summary
 pitcher_summary <- pitching_plus %>%
   filter(!is.na(Pitcher), !is.na(year), !is.na(PerPitch_Pitching_plus), !is.na(pitch_count)) %>%
   group_by(Pitcher, year) %>%
@@ -184,7 +194,7 @@ pitcher_summary <- pitching_plus %>%
     .groups = "drop"
   )
 
-# Step 7: Pitcher overall summary
+# 7. Pitcher overall summary
 pitcher_overall <- pitching_plus %>%
   filter(!is.na(Pitcher), !is.na(PerPitch_Pitching_plus), !is.na(pitch_count)) %>%
   group_by(Pitcher) %>%
@@ -199,7 +209,7 @@ pitcher_overall <- pitching_plus %>%
     .groups = "drop"
   )
 
-# Step 8: Final output
+# 8. Final output
 pitching_plus_summary <- bind_rows(pitcher_summary, pitcher_overall) %>%
   mutate(year = as.character(year)) %>%
   arrange(Pitcher, factor(year, levels = c("2024", "2025", "Overall")))

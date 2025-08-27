@@ -1,7 +1,7 @@
 library(rmarkdown)
 library(dplyr)
 
-# Load pitcher comments
+# Pitcher comments
 comments_df <- read.csv("Data/notes3.csv", stringsAsFactors = FALSE)
 
 # Ensure output directory exists
@@ -31,11 +31,11 @@ prospect_pitchers <- c("Kling, Corey",
                        "Pintar, Luka",
                        "Dean, Ben")
 
-# Loop and render individual reports
+# Loop 
 for (p in prospect_pitchers) {
   file_safe_name <- gsub(", ", "_", p)
   
-  # Look up custom comment for the pitcher
+  # Look up custom comment
   comment <- comments_df %>%
     filter(Pitcher == p) %>%
     pull(Comment)
